@@ -61,6 +61,6 @@ By integrating with the Wildberries API and keeping sellers in control of outgoi
 
 ### Database
 
-- **PostgreSQL + Prisma ORM** for product data, customer interactions, AI drafts, image metadata, and job history, with migrations and automated backups.
+- **PostgreSQL + Drizzle ORM** for product data, customer interactions, AI drafts, image metadata, and job history, with migrations and automated backups.
 
 **Security:** Seller-provided API keys are handled server-side, never logged, and encrypted if retained. The MVP does not require user sign-in.
