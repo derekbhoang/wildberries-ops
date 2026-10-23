@@ -47,3 +47,20 @@ By integrating with the Wildberries API and keeping sellers in control of outgoi
 6. **Export or publish:** The seller downloads the approved image or uploads it to the product listing through supported Wildberries media APIs, then verifies the result.
 
 **Seller control:** AI-generated replies are never sent, and generated images are never published, without explicit seller approval.
+
+## Tech Stack
+
+### Frontend
+
+- **Next.js (React) + TypeScript** for the web application, with **Tailwind CSS** and **shadcn/ui** for the interface.
+
+### Backend
+
+- **NestJS (Node.js + TypeScript)** for the API and server-side Wildberries/OpenAI integrations.
+- **BullMQ + Redis** for background synchronization, image-generation jobs, and retries; **S3-compatible object storage** for product images.
+
+### Database
+
+- **PostgreSQL + Prisma ORM** for product data, customer interactions, AI drafts, image metadata, and job history, with migrations and automated backups.
+
+**Security:** Seller-provided API keys are handled server-side, never logged, and encrypted if retained. The MVP does not require user sign-in.
