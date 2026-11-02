@@ -1,0 +1,31 @@
+const apiKey = process.env.WB_API_KEY?.trim();
+const questionId = process.argv[2]?.trim();
+const text = process.argv[3];
+
+if (!apiKey) {
+  throw new Error("Set WB_API_KEY in .env before running this script.");
+}
+
+if (!questionId || !text?.trim()) {
+  throw new Error('Usage: pnpm script scripts/questions-answer.ts <question-id> "<answer-text>"');
+}
+
+try {
+  const response = await fetch("https://feedbacks-api.wildberries.ru/api/v1/questions", {
+    method: "PATCH",
+    headers: { Authorization: apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: questionId, answer: { text }, state: "wbRu" }),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  console.log(`PATCH /api/v1/questions (answer): HTTP ${response.status}`);
+  const retryAfter = response.headers.get("X-Ratelimit-Retry");
+  if (retryAfter) console.log(`Retry after: ${retryAfter} seconds`);
+  console.log((await response.text()).replaceAll(apiKey, "[REDACTED]"));
+
+  if (!response.ok) process.exitCode = 1;
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(message.replaceAll(apiKey, "[REDACTED]"));
+  process.exitCode = 1;
+}
