@@ -3,6 +3,7 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from './config/env.validation.js';
+import { WildberriesModule } from './wildberries/wildberries.module.js';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { validateEnv } from './config/env.validation.js';
       skipProcessEnv: true,
       validate: validateEnv,
     }),
+    WildberriesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
