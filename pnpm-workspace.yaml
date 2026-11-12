@@ -4,6 +4,8 @@ packages:
 
 allowBuilds:
   esbuild: true
+  sharp: false
+  unrs-resolver: false
 
 catalog:
   zod: ^4.6.7
