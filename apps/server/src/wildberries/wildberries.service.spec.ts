@@ -117,16 +117,47 @@ describe('WildberriesService', () => {
     expect(url.searchParams.get('skip')).toBe('50');
   });
 
-  it('rejects invalid pagination before making an upstream request', async () => {
-    await expect(
-      service.listUnansweredFeedbacks({ take: 0 }),
-    ).rejects.toMatchObject({ status: 400 });
-    expect(fetchMock).not.toHaveBeenCalled();
+  it.each([
+    { take: 0 },
+    { take: 101 },
+    { take: 1.5 },
+    { skip: -1 },
+    { skip: 200_000 },
+    { skip: 0.5 },
+  ])(
+    'rejects invalid pagination %j before making an upstream request',
+    async (options) => {
+      await expect(
+        service.listUnansweredFeedbacks(options),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('accepts reviews with missing optional text and product details', async () => {
+    const minimalPage = {
+      ...page,
+      feedbacks: [
+        {
+          id: feedback.id,
+          productValuation: feedback.productValuation,
+          createdDate: feedback.createdDate,
+        },
+      ],
+    };
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ error: false, data: minimalPage }),
+    );
+
+    await expect(service.listUnansweredFeedbacks()).resolves.toEqual(
+      minimalPage,
+    );
   });
 
   it.each([
     ['WB application error', { error: true, data: null, errorText: secret }],
     ['missing data', { error: false, errorText: secret }],
+    ['invalid count', { error: false, data: { ...page, countUnanswered: -1 } }],
     [
       'invalid review fields',
       {
@@ -180,6 +211,7 @@ describe('WildberriesService', () => {
   it.each([
     ['2', 2],
     ['0', 0],
+    [' 12 ', 12],
     [null, undefined],
     ['', undefined],
     ['invalid', undefined],
@@ -214,15 +246,18 @@ describe('WildberriesService', () => {
     },
   );
 
-  it('maps other upstream errors to 502 without exposing their bodies', async () => {
-    fetchMock.mockResolvedValueOnce(
-      Response.json({ detail: secret }, { status: 500 }),
-    );
+  it.each([500, 503])(
+    'maps upstream %i to 502 without exposing its body',
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(
+        Response.json({ detail: secret }, { status }),
+      );
 
-    await expectFailure(502);
-    expect(warnMock).not.toHaveBeenCalled();
-    expect(errorMock).toHaveBeenCalledTimes(1);
-  });
+      await expectFailure(502);
+      expect(warnMock).not.toHaveBeenCalled();
+      expect(errorMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('maps malformed JSON to 502 without logging the raw body', async () => {
     fetchMock.mockResolvedValueOnce(new Response(`{"detail":"${secret}"`));
