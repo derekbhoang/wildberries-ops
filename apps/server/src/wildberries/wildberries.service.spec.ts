@@ -87,7 +87,7 @@ describe('WildberriesService', () => {
     await expect(service.listUnansweredFeedbacks()).resolves.toEqual(page);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [input, options] = fetchMock.mock.calls[0];
+    const [input, options] = fetchMock.mock.calls[0]!;
     const url = new URL(input instanceof Request ? input.url : input);
     expect(url.origin).toBe('https://feedbacks-api.wildberries.ru');
     expect(url.pathname).toBe('/api/v1/feedbacks');
@@ -111,7 +111,7 @@ describe('WildberriesService', () => {
     await expect(
       service.listUnansweredFeedbacks({ take: 25, skip: 50 }),
     ).resolves.toEqual(emptyPage);
-    const [input] = fetchMock.mock.calls[0];
+    const [input] = fetchMock.mock.calls[0]!;
     const url = new URL(input instanceof Request ? input.url : input);
     expect(url.searchParams.get('take')).toBe('25');
     expect(url.searchParams.get('skip')).toBe('50');
