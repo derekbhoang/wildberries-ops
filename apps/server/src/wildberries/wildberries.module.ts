@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HttpClientModule } from '@nestjs/http-client';
 import { WildberriesService } from './wildberries.service.js';
+import { FeedbacksController } from './feedbacks.controller.js';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { WildberriesService } from './wildberries.service.js';
       }),
     }),
   ],
+  controllers: [FeedbacksController],
   providers: [WildberriesService],
   exports: [WildberriesService],
 })
