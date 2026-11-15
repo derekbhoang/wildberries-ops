@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   HttpClient,
+  HttpClientError,
   HttpResponseError,
   InjectHttpClient,
   toHttpException,
@@ -15,6 +16,10 @@ import {
   feedbacksResponseSchema,
   type FeedbacksPage,
 } from './wildberries.schemas.js';
+import type {
+  FeedbackAnswer,
+  FeedbackAnswerResult,
+} from '@wildberries-ops/contracts';
 
 @Injectable()
 export class WildberriesService {
@@ -101,6 +106,74 @@ export class WildberriesService {
       }
 
       throw toHttpException(error);
+    }
+  }
+
+  async answerFeedback(
+    id: string,
+    body: FeedbackAnswer,
+  ): Promise<FeedbackAnswerResult> {
+    try {
+      const response = await this.http.post('/api/v1/feedbacks/answer', {
+        json: { id, text: body.text },
+        responseType: 'text',
+        retry: false,
+      });
+
+      if (response.status !== 204) {
+        throw new BadGatewayException({
+          code: 'WB_SUBMISSION_UNKNOWN',
+          message: 'Could not confirm whether Wildberries accepted the reply',
+        });
+      }
+
+      return { status: 'submitted' };
+    } catch (error) {
+      if (error instanceof HttpResponseError) {
+        if (error.status === 401 || error.status === 403) {
+          throw new BadGatewayException({
+            code: 'WB_ACCESS_DENIED',
+            message: 'Check the Wildberries API key and its permissions',
+          });
+        }
+
+        if (error.status === 429) {
+          const value = error.headers.get('X-Ratelimit-Retry')?.trim() ?? '';
+          const seconds = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+
+          throw new ServiceUnavailableException({
+            code: 'WB_RATE_LIMITED',
+            message: 'Wildberries request limit reached',
+            retryAfterSeconds: Number.isSafeInteger(seconds)
+              ? seconds
+              : undefined,
+          });
+        }
+
+        if (error.status === 400) {
+          throw new BadRequestException({
+            code: 'WB_REPLY_REJECTED',
+            message: 'Wildberries rejected the reply',
+          });
+        }
+      }
+
+      if (error instanceof HttpClientError) {
+        this.logger.warn({
+          operation: 'answerFeedback',
+          feedbackId: id,
+          code: 'WB_SUBMISSION_UNKNOWN',
+          upstreamStatus:
+            error instanceof HttpResponseError ? error.status : undefined,
+        });
+
+        throw new BadGatewayException({
+          code: 'WB_SUBMISSION_UNKNOWN',
+          message: 'Check the review before attempting to send the reply again',
+        });
+      }
+
+      throw error;
     }
   }
 }

@@ -27,6 +27,7 @@
     "@nestjs/core": "^12.0.1",
     "@nestjs/http-client": "^0.0.3",
     "@nestjs/platform-express": "^12.0.1",
+    "@wildberries-ops/contracts": "workspace:*",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "catalog:"

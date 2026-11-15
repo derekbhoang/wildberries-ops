@@ -27,3 +27,15 @@ export type FeedbackProductDetails = z.infer<
 >;
 export type Feedback = z.infer<typeof feedbackSchema>;
 export type FeedbacksPage = z.infer<typeof feedbacksPageSchema>;
+
+export const feedbackIdSchema = z.string().trim().min(1);
+
+export const feedbackAnswerSchema = z.strictObject({
+  text: z.string().trim().min(2).max(5000),
+});
+
+export type FeedbackAnswer = z.infer<typeof feedbackAnswerSchema>;
+
+export type FeedbackAnswerResult = {
+  status: "submitted";
+};
