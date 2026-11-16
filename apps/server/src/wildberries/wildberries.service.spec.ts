@@ -55,10 +55,13 @@ describe('WildberriesService', () => {
     vi.restoreAllMocks();
   });
 
-  async function expectFailure(status: number) {
+  async function expectFailure(
+    status: number,
+    operation: () => Promise<unknown> = () => service.listUnansweredFeedbacks(),
+  ) {
     let caught: unknown;
     try {
-      await service.listUnansweredFeedbacks();
+      await operation();
     } catch (error) {
       caught = error;
     }
@@ -294,6 +297,155 @@ describe('WildberriesService', () => {
 
     await expectFailure(504);
     expect(errorMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('submits the reply once and accepts an empty 204 response', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(
+      service.answerFeedback(feedback.id, { text: 'Thank you!' }),
+    ).resolves.toEqual({ status: 'submitted' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, options] = fetchMock.mock.calls[0]!;
+    const url = new URL(input instanceof Request ? input.url : input);
+    expect(url.origin).toBe('https://feedbacks-api.wildberries.ru');
+    expect(url.pathname).toBe('/api/v1/feedbacks/answer');
+    expect(options?.method).toBe('POST');
+    expect(new Headers(options?.headers).get('Authorization')).toBe(secret);
+    expect(new Headers(options?.headers).get('Content-Type')).toContain('application/json');
+    expect(options?.body).toBe(JSON.stringify({
+      id: feedback.id,
+      text: 'Thank you!',
+    }));
+  });
+
+  it.each([
+    [400, 400, 'WB_REPLY_REJECTED'],
+    [401, 502, 'WB_ACCESS_DENIED'],
+    [403, 502, 'WB_ACCESS_DENIED'],
+    [500, 502, 'WB_SUBMISSION_UNKNOWN'],
+    [503, 502, 'WB_SUBMISSION_UNKNOWN'],
+  ])('handles reply HTTP %i without retrying', async (upstreamStatus, status, code) => {
+    service = new WildberriesService(new HttpClient({
+      baseUrl: 'https://feedbacks-api.wildberries.ru',
+      headers: { Authorization: secret },
+      retry: { attempts: 2, methods: ['POST'] },
+      fetch: fetchMock,
+    }));
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ detail: secret }, { status: upstreamStatus }),
+    );
+
+    await expect(
+      expectFailure(status, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
+    ).resolves.toMatchObject({ code });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['12', '0', 'invalid', '-1', '9007199254740992'])(
+    'preserves safe reply cooldown metadata from %s',
+    async (value) => {
+      fetchMock.mockResolvedValueOnce(
+        Response.json({ detail: secret }, {
+          status: 429,
+          headers: { 'X-Ratelimit-Retry': value },
+        }),
+      );
+
+      const response = await expectFailure(503, () =>
+        service.answerFeedback(feedback.id, { text: 'Thank you!' }),
+      );
+      expect(response).toMatchObject({
+        code: 'WB_RATE_LIMITED',
+        retryAfterSeconds: value === '12' || value === '0' ? Number(value) : undefined,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('leaves a lost reply response uncertain without resending', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(
+      expectFailure(502, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
+    ).resolves.toMatchObject({ code: 'WB_SUBMISSION_UNKNOWN' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a reply timeout uncertain without resending', async () => {
+    service = new WildberriesService(new HttpClient({
+      baseUrl: 'https://feedbacks-api.wildberries.ru',
+      timeout: 10,
+      retry: { attempts: 2, methods: ['POST'] },
+      fetch: fetchMock,
+    }));
+    fetchMock.mockImplementationOnce((_input, options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+    }));
+
+    await expect(
+      expectFailure(502, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
+    ).resolves.toMatchObject({ code: 'WB_SUBMISSION_UNKNOWN' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves an unexpected success response uncertain', async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ detail: secret }));
+
+    await expect(
+      expectFailure(502, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
+    ).resolves.toMatchObject({ code: 'WB_SUBMISSION_UNKNOWN' });
+  });
+
+  it.each([
+    null,
+    { text: 'Thank you!', state: 'reviewRequired' },
+    { text: 'Thank you!', state: 'rejected' },
+  ])('reads the stored reply using GET without submitting anything', async (answer) => {
+    const status = { id: feedback.id, answer };
+    fetchMock.mockResolvedValueOnce(Response.json({
+      error: false,
+      data: { ...status, privateField: secret },
+    }));
+
+    await expect(service.getFeedbackAnswer(feedback.id)).resolves.toEqual(status);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, options] = fetchMock.mock.calls[0]!;
+    const url = new URL(input instanceof Request ? input.url : input);
+    expect(url.pathname).toBe('/api/v1/feedback');
+    expect(url.searchParams.get('id')).toBe(feedback.id);
+    expect(options?.method).toBe('GET');
+  });
+
+  it.each([
+    { error: false, data: { id: feedback.id } },
+    { error: false, data: { id: 'another-review', answer: null } },
+    { error: false, data: { id: feedback.id, answer: { text: secret } } },
+    { error: true, data: { id: feedback.id, answer: null }, errorText: secret },
+  ])('keeps an invalid status response unverified', async (body) => {
+    fetchMock.mockResolvedValueOnce(Response.json(body));
+
+    await expect(
+      expectFailure(502, () => service.getFeedbackAnswer(feedback.id)),
+    ).resolves.toMatchObject({ code: 'WB_INVALID_RESPONSE' });
+  });
+
+  it.each([
+    [401, 502, 'WB_ACCESS_DENIED'],
+    [403, 502, 'WB_ACCESS_DENIED'],
+    [429, 503, 'WB_RATE_LIMITED'],
+  ])('preserves status-check HTTP %i failures', async (upstreamStatus, status, code) => {
+    fetchMock.mockResolvedValueOnce(Response.json({ detail: secret }, {
+      status: upstreamStatus,
+      headers: { 'X-Ratelimit-Retry': '12' },
+    }));
+
+    await expect(
+      expectFailure(status, () => service.getFeedbackAnswer(feedback.id)),
+    ).resolves.toMatchObject({ code });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

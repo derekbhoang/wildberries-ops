@@ -4,6 +4,7 @@ import type { Feedback } from "@wildberries-ops/contracts";
 import Link from "next/link";
 import { Suspense } from "react";
 import { getFeedbacks, type FeedbacksResult } from "@/lib/feedbacks";
+import ReplyComposer from "@/components/feedbacks/reply-composer";
 
 const PAGE_SIZE = 50;
 const MAX_PAGE = Math.floor(199_990 / PAGE_SIZE) + 1;
@@ -93,6 +94,8 @@ function ReviewCard({ review }: { review: Feedback }) {
           "Date unavailable"
         )}
       </footer>
+
+      <ReplyComposer feedbackId={review.id} />
     </article>
   );
 }

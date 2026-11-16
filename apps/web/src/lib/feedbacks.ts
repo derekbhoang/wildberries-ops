@@ -2,7 +2,12 @@ import "server-only";
 
 import { unstable_rethrow } from "next/navigation";
 import {
+  feedbackAnswerSchema,
+  feedbackAnswerStatusSchema,
+  feedbackIdSchema,
   feedbacksPageSchema,
+  type FeedbackAnswerResult,
+  type FeedbackAnswerStatus,
   type FeedbacksPage,
 } from "@wildberries-ops/contracts";
 
@@ -123,4 +128,173 @@ export async function getFeedbacks({
   return parsed.success
     ? { ok: true, data: parsed.data }
     : { ok: false, reason: "invalid-response" };
+}
+
+export type AnswerFeedbackResult =
+  | { ok: true; data: FeedbackAnswerResult }
+  | {
+      ok: false;
+      reason: "invalid-input";
+      fieldErrors: { id?: string[]; text?: string[] };
+    }
+  | {
+      ok: false;
+      reason: "rate-limited";
+      retryAfterSeconds?: number;
+    }
+  | {
+      ok: false;
+      reason: "access-denied" | "rejected" | "submission-unknown";
+    };
+
+export async function answerFeedback(
+  id: unknown,
+  input: unknown,
+): Promise<AnswerFeedbackResult> {
+  const parsedId = feedbackIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return {
+      ok: false,
+      reason: "invalid-input",
+      fieldErrors: { id: ["The review ID is missing or invalid."] },
+    };
+  }
+
+  const parsedAnswer = feedbackAnswerSchema.safeParse(input);
+  if (!parsedAnswer.success) {
+    return {
+      ok: false,
+      reason: "invalid-input",
+      fieldErrors: {
+        text: ["Enter a reply between 2 and 5,000 characters."],
+      },
+    };
+  }
+
+  const apiUrl = process.env.API_URL?.trim();
+  if (!apiUrl) throw new Error("API_URL is required");
+
+  const url = new URL(
+    `/feedbacks/${encodeURIComponent(parsedId.data)}/answer`,
+    apiUrl,
+  );
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("API_URL must use HTTP or HTTPS");
+  }
+
+  let response: Response;
+  let body: unknown;
+
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(parsedAnswer.data),
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    body = await response.json();
+  } catch (error) {
+    unstable_rethrow(error);
+    return { ok: false, reason: "submission-unknown" };
+  }
+
+  if (response.ok) {
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      "status" in body &&
+      body.status === "submitted"
+    ) {
+      return { ok: true, data: { status: "submitted" } };
+    }
+
+    return { ok: false, reason: "submission-unknown" };
+  }
+
+  if (response.status === 502 && hasCode(body, "WB_ACCESS_DENIED")) {
+    return { ok: false, reason: "access-denied" };
+  }
+
+  if (response.status === 503 && hasCode(body, "WB_RATE_LIMITED")) {
+    return {
+      ok: false,
+      reason: "rate-limited",
+      retryAfterSeconds: readRetryAfterSeconds(body),
+    };
+  }
+
+  if (response.status === 400 && hasCode(body, "WB_REPLY_REJECTED")) {
+    return { ok: false, reason: "rejected" };
+  }
+
+  if (response.status === 400) {
+    return {
+      ok: false,
+      reason: "invalid-input",
+      fieldErrors: {},
+    };
+  }
+
+  return { ok: false, reason: "submission-unknown" };
+}
+
+export type GetFeedbackAnswerResult =
+  | { ok: true; data: FeedbackAnswerStatus }
+  | { ok: false; reason: "access-denied" | "unavailable" }
+  | { ok: false; reason: "rate-limited"; retryAfterSeconds?: number };
+
+export async function getFeedbackAnswer(
+  id: unknown,
+): Promise<GetFeedbackAnswerResult> {
+  const parsedId = feedbackIdSchema.safeParse(id);
+  if (!parsedId.success) return { ok: false, reason: "unavailable" };
+
+  const apiUrl = process.env.API_URL?.trim();
+  if (!apiUrl) throw new Error("API_URL is required");
+
+  const url = new URL(
+    `/feedbacks/${encodeURIComponent(parsedId.data)}/answer`,
+    apiUrl,
+  );
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("API_URL must use HTTP or HTTPS");
+  }
+
+  let response: Response;
+  let body: unknown;
+  try {
+    response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+    body = await response.json();
+  } catch (error) {
+    unstable_rethrow(error);
+    return { ok: false, reason: "unavailable" };
+  }
+
+  if (response.status === 502 && hasCode(body, "WB_ACCESS_DENIED")) {
+    return { ok: false, reason: "access-denied" };
+  }
+  if (response.status === 503 && hasCode(body, "WB_RATE_LIMITED")) {
+    return {
+      ok: false,
+      reason: "rate-limited",
+      retryAfterSeconds: readRetryAfterSeconds(body),
+    };
+  }
+  if (!response.ok) return { ok: false, reason: "unavailable" };
+
+  const parsed = feedbackAnswerStatusSchema.safeParse(body);
+  return parsed.success && parsed.data.id === parsedId.data
+    ? { ok: true, data: parsed.data }
+    : { ok: false, reason: "unavailable" };
 }

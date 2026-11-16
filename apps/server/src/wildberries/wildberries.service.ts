@@ -13,12 +13,14 @@ import {
   toHttpException,
 } from '@nestjs/http-client';
 import {
+  feedbackAnswerResponseSchema,
   feedbacksResponseSchema,
   type FeedbacksPage,
 } from './wildberries.schemas.js';
 import type {
   FeedbackAnswer,
   FeedbackAnswerResult,
+  FeedbackAnswerStatus,
 } from '@wildberries-ops/contracts';
 
 @Injectable()
@@ -71,40 +73,7 @@ export class WildberriesService {
 
       return parsed.data.data;
     } catch (error) {
-      if (error instanceof HttpResponseError) {
-        if (error.status === 401 || error.status === 403) {
-          this.logger.warn({
-            operation: 'listUnansweredFeedbacks',
-            code: 'WB_ACCESS_DENIED',
-            upstreamStatus: error.status,
-          });
-          throw new BadGatewayException({
-            code: 'WB_ACCESS_DENIED',
-            message: 'Check the Wildberries API key and its permissions',
-          });
-        }
-
-        if (error.status === 429) {
-          const value = error.headers.get('X-Ratelimit-Retry')?.trim() ?? '';
-          const seconds = /^\d+$/.test(value) ? Number(value) : Number.NaN;
-          const retryAfterSeconds = Number.isSafeInteger(seconds)
-            ? seconds
-            : undefined;
-
-          this.logger.warn({
-            operation: 'listUnansweredFeedbacks',
-            code: 'WB_RATE_LIMITED',
-            upstreamStatus: error.status,
-            retryAfterSeconds,
-          });
-          throw new ServiceUnavailableException({
-            code: 'WB_RATE_LIMITED',
-            message: 'Wildberries request limit reached',
-            retryAfterSeconds,
-          });
-        }
-      }
-
+      this.throwAccessOrRateLimitError(error, 'listUnansweredFeedbacks');
       throw toHttpException(error);
     }
   }
@@ -129,33 +98,12 @@ export class WildberriesService {
 
       return { status: 'submitted' };
     } catch (error) {
-      if (error instanceof HttpResponseError) {
-        if (error.status === 401 || error.status === 403) {
-          throw new BadGatewayException({
-            code: 'WB_ACCESS_DENIED',
-            message: 'Check the Wildberries API key and its permissions',
-          });
-        }
-
-        if (error.status === 429) {
-          const value = error.headers.get('X-Ratelimit-Retry')?.trim() ?? '';
-          const seconds = /^\d+$/.test(value) ? Number(value) : Number.NaN;
-
-          throw new ServiceUnavailableException({
-            code: 'WB_RATE_LIMITED',
-            message: 'Wildberries request limit reached',
-            retryAfterSeconds: Number.isSafeInteger(seconds)
-              ? seconds
-              : undefined,
-          });
-        }
-
-        if (error.status === 400) {
-          throw new BadRequestException({
-            code: 'WB_REPLY_REJECTED',
-            message: 'Wildberries rejected the reply',
-          });
-        }
+      this.throwAccessOrRateLimitError(error, 'answerFeedback');
+      if (error instanceof HttpResponseError && error.status === 400) {
+        throw new BadRequestException({
+          code: 'WB_REPLY_REJECTED',
+          message: 'Wildberries rejected the reply',
+        });
       }
 
       if (error instanceof HttpClientError) {
@@ -174,6 +122,70 @@ export class WildberriesService {
       }
 
       throw error;
+    }
+  }
+
+  async getFeedbackAnswer(id: string): Promise<FeedbackAnswerStatus> {
+    try {
+      const { data: body } = await this.http.get<unknown>('/api/v1/feedback', {
+        query: { id },
+        responseType: 'json',
+        retry: false,
+      });
+      const parsed = feedbackAnswerResponseSchema.safeParse(body);
+
+      if (!parsed.success || parsed.data.data.id !== id) {
+        this.logger.warn({
+          operation: 'getFeedbackAnswer',
+          feedbackId: id,
+          code: 'WB_INVALID_RESPONSE',
+        });
+        throw new BadGatewayException({
+          code: 'WB_INVALID_RESPONSE',
+          message: 'Could not read the reply status from Wildberries',
+        });
+      }
+
+      return parsed.data.data;
+    } catch (error) {
+      this.throwAccessOrRateLimitError(error, 'getFeedbackAnswer');
+      throw toHttpException(error);
+    }
+  }
+
+  private throwAccessOrRateLimitError(error: unknown, operation: string): void {
+    if (!(error instanceof HttpResponseError)) return;
+
+    if (error.status === 401 || error.status === 403) {
+      this.logger.warn({
+        operation,
+        code: 'WB_ACCESS_DENIED',
+        upstreamStatus: error.status,
+      });
+      throw new BadGatewayException({
+        code: 'WB_ACCESS_DENIED',
+        message: 'Check the Wildberries API key and its permissions',
+      });
+    }
+
+    if (error.status === 429) {
+      const value = error.headers.get('X-Ratelimit-Retry')?.trim() ?? '';
+      const seconds = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+      const retryAfterSeconds = Number.isSafeInteger(seconds)
+        ? seconds
+        : undefined;
+
+      this.logger.warn({
+        operation,
+        code: 'WB_RATE_LIMITED',
+        upstreamStatus: error.status,
+        retryAfterSeconds,
+      });
+      throw new ServiceUnavailableException({
+        code: 'WB_RATE_LIMITED',
+        message: 'Wildberries request limit reached',
+        retryAfterSeconds,
+      });
     }
   }
 }

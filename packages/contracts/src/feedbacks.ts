@@ -39,3 +39,13 @@ export type FeedbackAnswer = z.infer<typeof feedbackAnswerSchema>;
 export type FeedbackAnswerResult = {
   status: "submitted";
 };
+
+export const feedbackAnswerStatusSchema = z.object({
+  id: z.string(),
+  answer: z.object({
+    text: z.string(),
+    state: z.string(),
+  }).nullable(),
+});
+
+export type FeedbackAnswerStatus = z.infer<typeof feedbackAnswerStatusSchema>;

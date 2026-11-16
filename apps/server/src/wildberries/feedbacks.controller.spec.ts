@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  BadRequestException,
   GatewayTimeoutException,
   ServiceUnavailableException,
   type INestApplication,
@@ -20,10 +21,12 @@ import { FeedbacksController } from './feedbacks.controller.js';
 import type { FeedbacksPage } from './wildberries.schemas.js';
 import { WildberriesService } from './wildberries.service.js';
 
-describe('GET /feedbacks', () => {
+describe('FeedbacksController', () => {
   let app: INestApplication<Server>;
   const listUnansweredFeedbacks =
     vi.fn<WildberriesService['listUnansweredFeedbacks']>();
+  const getFeedbackAnswer = vi.fn<WildberriesService['getFeedbackAnswer']>();
+  const answerFeedback = vi.fn<WildberriesService['answerFeedback']>();
   const page: FeedbacksPage = {
     countUnanswered: 12,
     countArchive: 30,
@@ -44,7 +47,11 @@ describe('GET /feedbacks', () => {
       providers: [
         {
           provide: WildberriesService,
-          useValue: { listUnansweredFeedbacks },
+          useValue: {
+            listUnansweredFeedbacks,
+            getFeedbackAnswer,
+            answerFeedback,
+          },
         },
       ],
     }).compile();
@@ -56,6 +63,10 @@ describe('GET /feedbacks', () => {
   beforeEach(() => {
     listUnansweredFeedbacks.mockReset();
     listUnansweredFeedbacks.mockResolvedValue(page);
+    getFeedbackAnswer.mockReset();
+    getFeedbackAnswer.mockResolvedValue({ id: 'review-1', answer: null });
+    answerFeedback.mockReset();
+    answerFeedback.mockResolvedValue({ status: 'submitted' });
   });
 
   afterAll(async () => {
@@ -101,6 +112,40 @@ describe('GET /feedbacks', () => {
       .get('/feedbacks')
       .expect(200)
       .expect(emptyPage);
+  });
+
+  it('returns uncached reply status for the requested review', async () => {
+    await request(app.getHttpServer())
+      .get('/feedbacks/review-1/answer')
+      .expect('Cache-Control', 'no-store')
+      .expect(200)
+      .expect({ id: 'review-1', answer: null });
+
+    expect(getFeedbackAnswer).toHaveBeenCalledExactlyOnceWith('review-1');
+  });
+
+  it('rejects an empty review ID before checking upstream', async () => {
+    await request(app.getHttpServer())
+      .get('/feedbacks/%20/answer')
+      .expect(400);
+
+    expect(getFeedbackAnswer).not.toHaveBeenCalled();
+  });
+
+  it('returns status-check cooldown metadata', async () => {
+    getFeedbackAnswer.mockRejectedValueOnce(new ServiceUnavailableException({
+      code: 'WB_RATE_LIMITED',
+      retryAfterSeconds: 12,
+    }));
+
+    const response = await request(app.getHttpServer())
+      .get('/feedbacks/review-1/answer')
+      .expect(503);
+
+    expect(response.body).toMatchObject({
+      code: 'WB_RATE_LIMITED',
+      retryAfterSeconds: 12,
+    });
   });
 
   it.each([
@@ -160,5 +205,116 @@ describe('GET /feedbacks', () => {
 
     expect(response.body).toEqual(error.getResponse());
     expect(listUnansweredFeedbacks).toHaveBeenCalledTimes(1);
+  });
+
+  describe('POST /feedbacks/:id/answer', () => {
+    it('submits the trimmed reply and returns JSON with HTTP 200', async () => {
+      await request(app.getHttpServer())
+        .post('/feedbacks/%20review-1%20/answer')
+        .send({ text: '  Thank you!\nWe appreciate your feedback.  ' })
+        .expect('Content-Type', /json/)
+        .expect(200)
+        .expect({ status: 'submitted' });
+
+      expect(answerFeedback).toHaveBeenCalledExactlyOnceWith('review-1', {
+        text: 'Thank you!\nWe appreciate your feedback.',
+      });
+    });
+
+    it.each([
+      { name: 'minimum length', text: 'OK' },
+      { name: 'maximum length', text: 'a'.repeat(5000) },
+    ])('accepts a reply at $name', async ({ text }) => {
+      await request(app.getHttpServer())
+        .post('/feedbacks/review-1/answer')
+        .send({ text })
+        .expect(200)
+        .expect({ status: 'submitted' });
+
+      expect(answerFeedback).toHaveBeenCalledExactlyOnceWith('review-1', {
+        text,
+      });
+    });
+
+    it.each([
+      { name: 'missing text', body: {} },
+      { name: 'null text', body: { text: null } },
+      { name: 'numeric text', body: { text: 123 } },
+      { name: 'array text', body: { text: ['Thank you!'] } },
+      { name: 'empty text', body: { text: '' } },
+      { name: 'whitespace-only text', body: { text: ' \n\t ' } },
+      { name: 'one character', body: { text: 'a' } },
+      { name: 'one character after trimming', body: { text: '  a  ' } },
+      { name: 'overlong text', body: { text: 'a'.repeat(5001) } },
+      {
+        name: 'unexpected body fields',
+        body: { text: 'Thank you!', id: 'another-review' },
+      },
+    ])('rejects $name before calling the service', async ({ body }) => {
+      await request(app.getHttpServer())
+        .post('/feedbacks/review-1/answer')
+        .send(body)
+        .expect(400);
+
+      expect(answerFeedback).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty review ID before calling the service', async () => {
+      await request(app.getHttpServer())
+        .post('/feedbacks/%20/answer')
+        .send({ text: 'Thank you!' })
+        .expect(400);
+
+      expect(answerFeedback).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {
+        name: 'reply rejection',
+        status: 400,
+        makeError: () => new BadRequestException({
+          code: 'WB_REPLY_REJECTED',
+          message: 'Wildberries rejected the reply',
+        }),
+      },
+      {
+        name: 'seller access failure',
+        status: 502,
+        makeError: () => new BadGatewayException({
+          code: 'WB_ACCESS_DENIED',
+          message: 'Check the Wildberries API key and its permissions',
+        }),
+      },
+      {
+        name: 'rate limit and cooldown',
+        status: 503,
+        makeError: () => new ServiceUnavailableException({
+          code: 'WB_RATE_LIMITED',
+          message: 'Wildberries request limit reached',
+          retryAfterSeconds: 12,
+        }),
+      },
+      {
+        name: 'uncertain submission',
+        status: 502,
+        makeError: () => new BadGatewayException({
+          code: 'WB_SUBMISSION_UNKNOWN',
+          message: 'Check the review before attempting to send the reply again',
+        }),
+      },
+    ])('preserves the service $name', async ({ status, makeError }) => {
+      const error = makeError();
+      answerFeedback.mockRejectedValueOnce(error);
+
+      const response = await request(app.getHttpServer())
+        .post('/feedbacks/review-1/answer')
+        .send({ text: 'Thank you!' })
+        .expect(status);
+
+      expect(response.body).toEqual(error.getResponse());
+      expect(answerFeedback).toHaveBeenCalledExactlyOnceWith('review-1', {
+        text: 'Thank you!',
+      });
+    });
   });
 });

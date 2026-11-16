@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import { feedbackAnswerStatusSchema } from '@wildberries-ops/contracts';
+
+export const feedbackAnswerResponseSchema = z.object({
+  error: z.literal(false),
+  data: feedbackAnswerStatusSchema,
+});
 
 export const feedbacksResponseSchema = z.object({
   error: z.literal(false),
