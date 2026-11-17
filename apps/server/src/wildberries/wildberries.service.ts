@@ -73,7 +73,9 @@ export class WildberriesService {
 
       return parsed.data.data;
     } catch (error) {
-      this.throwAccessOrRateLimitError(error, 'listUnansweredFeedbacks');
+      this.throwAccessOrRateLimitError(error, {
+        operation: 'listUnansweredFeedbacks',
+      });
       throw toHttpException(error);
     }
   }
@@ -90,6 +92,12 @@ export class WildberriesService {
       });
 
       if (response.status !== 204) {
+        this.logger.warn({
+          operation: 'answerFeedback',
+          feedbackId: id,
+          code: 'WB_SUBMISSION_UNKNOWN',
+          upstreamStatus: response.status,
+        });
         throw new BadGatewayException({
           code: 'WB_SUBMISSION_UNKNOWN',
           message: 'Could not confirm whether Wildberries accepted the reply',
@@ -98,8 +106,17 @@ export class WildberriesService {
 
       return { status: 'submitted' };
     } catch (error) {
-      this.throwAccessOrRateLimitError(error, 'answerFeedback');
+      this.throwAccessOrRateLimitError(error, {
+        operation: 'answerFeedback',
+        feedbackId: id,
+      });
       if (error instanceof HttpResponseError && error.status === 400) {
+        this.logger.warn({
+          operation: 'answerFeedback',
+          feedbackId: id,
+          code: 'WB_REPLY_REJECTED',
+          upstreamStatus: error.status,
+        });
         throw new BadRequestException({
           code: 'WB_REPLY_REJECTED',
           message: 'Wildberries rejected the reply',
@@ -148,17 +165,23 @@ export class WildberriesService {
 
       return parsed.data.data;
     } catch (error) {
-      this.throwAccessOrRateLimitError(error, 'getFeedbackAnswer');
+      this.throwAccessOrRateLimitError(error, {
+        operation: 'getFeedbackAnswer',
+        feedbackId: id,
+      });
       throw toHttpException(error);
     }
   }
 
-  private throwAccessOrRateLimitError(error: unknown, operation: string): void {
+  private throwAccessOrRateLimitError(
+    error: unknown,
+    context: { operation: string; feedbackId?: string },
+  ): void {
     if (!(error instanceof HttpResponseError)) return;
 
     if (error.status === 401 || error.status === 403) {
       this.logger.warn({
-        operation,
+        ...context,
         code: 'WB_ACCESS_DENIED',
         upstreamStatus: error.status,
       });
@@ -176,7 +199,7 @@ export class WildberriesService {
         : undefined;
 
       this.logger.warn({
-        operation,
+        ...context,
         code: 'WB_RATE_LIMITED',
         upstreamStatus: error.status,
         retryAfterSeconds,

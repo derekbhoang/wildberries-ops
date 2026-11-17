@@ -341,6 +341,12 @@ describe('WildberriesService', () => {
     await expect(
       expectFailure(status, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
     ).resolves.toMatchObject({ code });
+    expect(warnMock).toHaveBeenCalledExactlyOnceWith({
+      operation: 'answerFeedback',
+      feedbackId: feedback.id,
+      code,
+      upstreamStatus,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -354,12 +360,20 @@ describe('WildberriesService', () => {
         }),
       );
 
+      const retryAfterSeconds = value === '12' || value === '0' ? Number(value) : undefined;
       const response = await expectFailure(503, () =>
         service.answerFeedback(feedback.id, { text: 'Thank you!' }),
       );
       expect(response).toMatchObject({
         code: 'WB_RATE_LIMITED',
-        retryAfterSeconds: value === '12' || value === '0' ? Number(value) : undefined,
+        retryAfterSeconds,
+      });
+      expect(warnMock).toHaveBeenCalledExactlyOnceWith({
+        operation: 'answerFeedback',
+        feedbackId: feedback.id,
+        code: 'WB_RATE_LIMITED',
+        upstreamStatus: 429,
+        retryAfterSeconds,
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
     },
@@ -371,6 +385,12 @@ describe('WildberriesService', () => {
     await expect(
       expectFailure(502, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
     ).resolves.toMatchObject({ code: 'WB_SUBMISSION_UNKNOWN' });
+    expect(warnMock).toHaveBeenCalledExactlyOnceWith({
+      operation: 'answerFeedback',
+      feedbackId: feedback.id,
+      code: 'WB_SUBMISSION_UNKNOWN',
+      upstreamStatus: undefined,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -388,6 +408,12 @@ describe('WildberriesService', () => {
     await expect(
       expectFailure(502, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
     ).resolves.toMatchObject({ code: 'WB_SUBMISSION_UNKNOWN' });
+    expect(warnMock).toHaveBeenCalledExactlyOnceWith({
+      operation: 'answerFeedback',
+      feedbackId: feedback.id,
+      code: 'WB_SUBMISSION_UNKNOWN',
+      upstreamStatus: undefined,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -397,6 +423,12 @@ describe('WildberriesService', () => {
     await expect(
       expectFailure(502, () => service.answerFeedback(feedback.id, { text: 'Thank you!' })),
     ).resolves.toMatchObject({ code: 'WB_SUBMISSION_UNKNOWN' });
+    expect(warnMock).toHaveBeenCalledExactlyOnceWith({
+      operation: 'answerFeedback',
+      feedbackId: feedback.id,
+      code: 'WB_SUBMISSION_UNKNOWN',
+      upstreamStatus: 200,
+    });
   });
 
   it.each([
@@ -446,6 +478,12 @@ describe('WildberriesService', () => {
     await expect(
       expectFailure(status, () => service.getFeedbackAnswer(feedback.id)),
     ).resolves.toMatchObject({ code });
+    expect(warnMock).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      operation: 'getFeedbackAnswer',
+      feedbackId: feedback.id,
+      code,
+      upstreamStatus,
+    }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
