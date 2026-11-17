@@ -10,6 +10,7 @@ import {
   type CheckFeedbackAnswerActionState,
 } from "@/app/actions/feedbacks";
 import { Button } from "@/components/ui/button";
+import { useReplyNotification } from "@/components/feedbacks/reply-notifications";
 
 type ComposerState = (
   | AnswerFeedbackActionState
@@ -29,6 +30,7 @@ export default function ReplyComposer({
 }) {
   const inputId = useId();
   const router = useRouter();
+  const notify = useReplyNotification();
   const [text, setText] = useState("");
   const [now, setNow] = useState(0);
 
@@ -69,6 +71,7 @@ export default function ReplyComposer({
       }
 
       if (result.status === "submitted") {
+        notify(result.message);
         setText("");
         startTransition(() => router.refresh());
       }
@@ -119,13 +122,7 @@ export default function ReplyComposer({
   const needsStatusCheck = state.needsStatusCheck === true;
   const answered = state.status === "answered";
 
-  if (state.status === "submitted") {
-    return (
-      <p role="status" className="text-sm text-muted-foreground">
-        {state.message}
-      </p>
-    );
-  }
+  if (state.status === "submitted") return null;
 
   return (
     <form action={formAction} aria-busy={pending} className="space-y-3">

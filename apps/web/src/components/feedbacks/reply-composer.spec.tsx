@@ -7,6 +7,8 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import Home from "@/app/page";
 import type {
   answerFeedbackAction,
   checkFeedbackAnswerAction,
@@ -14,10 +16,11 @@ import type {
 } from "@/app/actions/feedbacks";
 import ReplyComposer from "./reply-composer";
 
-const { answerMock, checkMock, refreshMock } = vi.hoisted(() => ({
+const { answerMock, checkMock, refreshMock, reviewResultsMock } = vi.hoisted(() => ({
   answerMock: vi.fn<typeof answerFeedbackAction>(),
   checkMock: vi.fn<typeof checkFeedbackAnswerAction>(),
   refreshMock: vi.fn(),
+  reviewResultsMock: vi.fn<() => ReactNode>(),
 }));
 
 vi.mock("@/app/actions/feedbacks", () => ({
@@ -29,7 +32,20 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock }),
 }));
 
+vi.mock("@/components/feedbacks/reviews-content", () => ({
+  default: () => reviewResultsMock(),
+  ReviewsSkeleton: () => null,
+}));
+
 const draft = "Thank you!\nWe appreciate your feedback.";
+const pageProps = {
+  params: Promise.resolve({}),
+  searchParams: Promise.resolve({}),
+} satisfies PageProps<"/">;
+
+function renderComposer() {
+  return render(<Home {...pageProps} />);
+}
 
 function enterDraft() {
   const input = screen.getByRole<HTMLTextAreaElement>("textbox", {
@@ -42,6 +58,7 @@ function enterDraft() {
 describe("ReplyComposer", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    reviewResultsMock.mockReturnValue(<ReplyComposer feedbackId="review-1" />);
     answerMock.mockResolvedValue({
       status: "submitted",
       message: "Reply submitted.",
@@ -63,7 +80,7 @@ describe("ReplyComposer", () => {
     { name: "one character after trimming", text: "  a  " },
     { name: "overlong text", text: "a".repeat(5001) },
   ])("prevents sending $name", ({ text }) => {
-    render(<ReplyComposer feedbackId="review-1" />);
+    renderComposer();
     fireEvent.change(screen.getByRole("textbox", { name: "Reply" }), {
       target: { value: text },
     });
@@ -79,7 +96,7 @@ describe("ReplyComposer", () => {
   it("submits once after repeated clicks and refreshes after success", async () => {
     const submission = Promise.withResolvers<AnswerFeedbackActionState>();
     answerMock.mockReturnValueOnce(submission.promise);
-    render(<ReplyComposer feedbackId="review-1" />);
+    renderComposer();
     const input = enterDraft();
     const send = screen.getByRole<HTMLButtonElement>("button", {
       name: "Send reply",
@@ -108,6 +125,31 @@ describe("ReplyComposer", () => {
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves the submission confirmation when refreshing replaces the inbox with an error", async () => {
+    const view = renderComposer();
+    refreshMock.mockImplementationOnce(() => {
+      reviewResultsMock.mockReturnValue(
+        <section role="alert">Couldn’t load reviews</section>,
+      );
+      view.rerender(<Home {...pageProps} />);
+    });
+    enterDraft();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Couldn’t load reviews",
+    );
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Reply submitted.");
+    expect(answerMock).toHaveBeenCalledTimes(1);
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    expect(screen.queryByText("Reply submitted.")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("Couldn’t load reviews");
+  });
+
   it.each(["rejected", "access-denied"] as const)(
     "preserves the draft after a %s response",
     async (reason) => {
@@ -117,7 +159,7 @@ describe("ReplyComposer", () => {
         reason,
         message: "Unable to submit this reply.",
       });
-      render(<ReplyComposer feedbackId="review-1" />);
+      renderComposer();
       const input = enterDraft();
       fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
 
@@ -138,7 +180,7 @@ describe("ReplyComposer", () => {
       message: "Check the reply text.",
       fieldErrors: { text: ["The reply text is invalid."] },
     });
-    render(<ReplyComposer feedbackId="review-1" />);
+    renderComposer();
     const input = enterDraft();
     fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
 
@@ -156,7 +198,7 @@ describe("ReplyComposer", () => {
       message: "Wait before sending again.",
       retryAfterSeconds: 2,
     });
-    render(<ReplyComposer feedbackId="review-1" />);
+    renderComposer();
     const input = enterDraft();
 
     await act(async () => {
@@ -180,7 +222,7 @@ describe("ReplyComposer", () => {
 
   it("requires a status check after losing the submission response", async () => {
     answerMock.mockRejectedValueOnce(new Error("Connection lost"));
-    render(<ReplyComposer feedbackId="review-1" />);
+    renderComposer();
     const input = enterDraft();
     fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
 
@@ -214,7 +256,7 @@ describe("ReplyComposer", () => {
       reason: "unavailable",
       message: "Could not check the reply status.",
     });
-    render(<ReplyComposer feedbackId="review-1" />);
+    renderComposer();
     const input = enterDraft();
     fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
     fireEvent.click(
@@ -245,7 +287,7 @@ describe("ReplyComposer", () => {
       message: "A reply already exists on Wildberries.",
       answer: { text: draft, state: "reviewRequired" },
     });
-    render(<ReplyComposer feedbackId="review-1" />);
+    renderComposer();
     const input = enterDraft();
     fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
     fireEvent.click(

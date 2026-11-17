@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import RefreshButton from "@/components/feedbacks/refresh-button";
+import ReplyNotifications from "@/components/feedbacks/reply-notifications";
 import ReviewsContent, {
   ReviewsSkeleton,
 } from "@/components/feedbacks/reviews-content";
@@ -20,9 +21,11 @@ export default function Home({ searchParams }: PageProps<"/">) {
         <RefreshButton />
       </header>
 
-      <Suspense fallback={<ReviewsSkeleton />}>
-        <ReviewsContent searchParams={searchParams} />
-      </Suspense>
+      <ReplyNotifications>
+        <Suspense fallback={<ReviewsSkeleton />}>
+          <ReviewsContent searchParams={searchParams} />
+        </Suspense>
+      </ReplyNotifications>
     </main>
   );
 }
