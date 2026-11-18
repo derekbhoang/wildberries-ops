@@ -431,6 +431,152 @@ describe('WildberriesService', () => {
     });
   });
 
+  describe('getFeedbackForDraft', () => {
+    it('forwards caller cancellation to the HTTP request and preserves the abort reason', async () => {
+      const controller = new AbortController();
+      const reason = new Error('Draft deadline expired');
+      const started = Promise.withResolvers<AbortSignal>();
+      fetchMock.mockImplementationOnce((_input, options) => new Promise((_resolve, reject) => {
+        const signal = options!.signal!;
+        started.resolve(signal);
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }));
+      const failure = expect(
+        service.getFeedbackForDraft(feedback.id, controller.signal),
+      ).rejects.toBe(reason);
+      const requestSignal = await started.promise;
+
+      controller.abort(reason);
+      await failure;
+
+      expect(requestSignal.aborted).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(warnMock).not.toHaveBeenCalled();
+      expect(errorMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      null,
+      { text: 'Thank you!', state: 'reviewRequired' },
+      { text: 'Thank you!', state: 'rejected' },
+    ])('returns validated review context and answer %j using one GET', async (answer) => {
+      fetchMock.mockResolvedValueOnce(Response.json({
+        error: false,
+        data: {
+          ...feedback,
+          answer: answer && { ...answer, privateField: secret },
+          productDetails: { ...feedback.productDetails, privateField: secret },
+          privateField: secret,
+        },
+        errorText: secret,
+      }));
+
+      await expect(service.getFeedbackForDraft(` ${feedback.id} `))
+        .resolves.toEqual({ ...feedback, answer });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [input, options] = fetchMock.mock.calls[0]!;
+      const url = new URL(input instanceof Request ? input.url : input);
+      expect(url.origin).toBe('https://feedbacks-api.wildberries.ru');
+      expect(url.pathname).toBe('/api/v1/feedback');
+      expect(Object.fromEntries(url.searchParams)).toEqual({ id: feedback.id });
+      expect(options?.method).toBe('GET');
+      expect(new Headers(options?.headers).get('Authorization')).toBe(secret);
+      expect(warnMock).not.toHaveBeenCalled();
+      expect(errorMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {},
+      { text: null, pros: null, cons: null, productDetails: null },
+    ])('accepts absent or null optional review context: %j', async (optional) => {
+      const review = {
+        id: feedback.id,
+        productValuation: feedback.productValuation,
+        createdDate: feedback.createdDate,
+        answer: null,
+        ...optional,
+      };
+      fetchMock.mockResolvedValueOnce(Response.json({ error: false, data: review }));
+
+      await expect(service.getFeedbackForDraft(feedback.id)).resolves.toEqual(review);
+    });
+
+    it.each(['', ' \n\t '])('rejects an invalid ID before fetching: %j', async (id) => {
+      await expect(
+        expectFailure(400, () => service.getFeedbackForDraft(id)),
+      ).resolves.toMatchObject({ code: 'INVALID_FEEDBACK_ID' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { error: true, data: null, errorText: secret },
+      { error: false },
+      { error: false, data: { ...feedback } },
+      { error: false, data: { id: feedback.id, answer: null } },
+      { error: false, data: { ...feedback, id: 'another-review', answer: null } },
+      { error: false, data: { ...feedback, productValuation: secret, answer: null } },
+      { error: false, data: { ...feedback, productDetails: { nmId: secret }, answer: null } },
+      { error: false, data: { ...feedback, answer: { text: secret } } },
+    ])('rejects an unsuccessful, malformed, or mismatched response: %#', async (body) => {
+      fetchMock.mockResolvedValueOnce(Response.json(body));
+
+      await expect(
+        expectFailure(502, () => service.getFeedbackForDraft(feedback.id)),
+      ).resolves.toMatchObject({ code: 'WB_INVALID_RESPONSE' });
+      expect(warnMock).toHaveBeenCalledExactlyOnceWith({
+        operation: 'getFeedbackForDraft',
+        feedbackId: feedback.id,
+        code: 'WB_INVALID_RESPONSE',
+      });
+      expect(errorMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { upstreamStatus: 401, status: 502, code: 'WB_ACCESS_DENIED' },
+      { upstreamStatus: 403, status: 502, code: 'WB_ACCESS_DENIED' },
+      { upstreamStatus: 429, status: 503, code: 'WB_RATE_LIMITED' },
+      { upstreamStatus: 500, status: 502, code: undefined },
+    ])('maps upstream HTTP $upstreamStatus without retrying or exposing its body', async ({ upstreamStatus, status, code }) => {
+      service = new WildberriesService(new HttpClient({
+        baseUrl: 'https://feedbacks-api.wildberries.ru',
+        retry: { attempts: 2, methods: ['GET'] },
+        fetch: fetchMock,
+      }));
+      fetchMock.mockResolvedValueOnce(Response.json({ detail: secret }, {
+        status: upstreamStatus,
+        headers: { 'X-Ratelimit-Retry': '12' },
+      }));
+
+      const response = await expectFailure(status, () => service.getFeedbackForDraft(feedback.id));
+      if (code) expect(response).toMatchObject({ code });
+      if (upstreamStatus === 429) expect(response).toMatchObject({ retryAfterSeconds: 12 });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps malformed JSON to 502 without exposing the raw body', async () => {
+      fetchMock.mockResolvedValueOnce(new Response(`{"detail":"${secret}"`));
+
+      await expectFailure(502, () => service.getFeedbackForDraft(feedback.id));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a timeout to 504', async () => {
+      service = new WildberriesService(new HttpClient({
+        baseUrl: 'https://feedbacks-api.wildberries.ru',
+        timeout: 10,
+        retry: false,
+        fetch: fetchMock,
+      }));
+      fetchMock.mockImplementationOnce((_input, options) => new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+      }));
+
+      await expectFailure(504, () => service.getFeedbackForDraft(feedback.id));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it.each([
     null,
     { text: 'Thank you!', state: 'reviewRequired' },

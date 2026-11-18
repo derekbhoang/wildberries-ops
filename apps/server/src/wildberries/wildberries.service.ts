@@ -14,13 +14,16 @@ import {
 } from '@nestjs/http-client';
 import {
   feedbackAnswerResponseSchema,
+  feedbackForDraftResponseSchema,
   feedbacksResponseSchema,
+  type FeedbackForDraft,
   type FeedbacksPage,
 } from './wildberries.schemas.js';
-import type {
-  FeedbackAnswer,
-  FeedbackAnswerResult,
-  FeedbackAnswerStatus,
+import {
+  feedbackIdSchema,
+  type FeedbackAnswer,
+  type FeedbackAnswerResult,
+  type FeedbackAnswerStatus,
 } from '@wildberries-ops/contracts';
 
 @Injectable()
@@ -168,6 +171,52 @@ export class WildberriesService {
       this.throwAccessOrRateLimitError(error, {
         operation: 'getFeedbackAnswer',
         feedbackId: id,
+      });
+      throw toHttpException(error);
+    }
+  }
+
+  async getFeedbackForDraft(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<FeedbackForDraft> {
+    const parsedId = feedbackIdSchema.safeParse(id);
+    if (!parsedId.success) {
+      throw new BadRequestException({
+        code: 'INVALID_FEEDBACK_ID',
+        message: 'The review ID is missing or invalid',
+      });
+    }
+
+    const feedbackId = parsedId.data;
+
+    try {
+      const { data: body } = await this.http.get<unknown>('/api/v1/feedback', {
+        query: { id: feedbackId },
+        responseType: 'json',
+        retry: false,
+        signal,
+      });
+      const parsed = feedbackForDraftResponseSchema.safeParse(body);
+
+      if (!parsed.success || parsed.data.data.id !== feedbackId) {
+        this.logger.warn({
+          operation: 'getFeedbackForDraft',
+          feedbackId,
+          code: 'WB_INVALID_RESPONSE',
+        });
+        throw new BadGatewayException({
+          code: 'WB_INVALID_RESPONSE',
+          message: 'Could not read the requested review from Wildberries',
+        });
+      }
+
+      return parsed.data.data;
+    } catch (error) {
+      signal?.throwIfAborted();
+      this.throwAccessOrRateLimitError(error, {
+        operation: 'getFeedbackForDraft',
+        feedbackId,
       });
       throw toHttpException(error);
     }

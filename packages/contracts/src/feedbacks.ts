@@ -36,6 +36,13 @@ export const feedbackAnswerSchema = z.strictObject({
 
 export type FeedbackAnswer = z.infer<typeof feedbackAnswerSchema>;
 
+export const feedbackDraftSchema = z.strictObject({
+  feedbackId: feedbackIdSchema,
+  text: feedbackAnswerSchema.shape.text,
+});
+
+export type FeedbackDraft = z.infer<typeof feedbackDraftSchema>;
+
 export type FeedbackAnswerResult = {
   status: "submitted";
 };

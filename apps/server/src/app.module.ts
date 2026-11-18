@@ -4,6 +4,7 @@ import { AppService } from './app.service.js';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from './config/env.validation.js';
 import { WildberriesModule } from './wildberries/wildberries.module.js';
+import { FeedbackDraftsModule } from './feedback-drafts/feedback-drafts.module.js';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { WildberriesModule } from './wildberries/wildberries.module.js';
       validate: validateEnv,
     }),
     WildberriesModule,
+    FeedbackDraftsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
