@@ -2,7 +2,7 @@
 
 import { feedbackAnswerSchema } from "@wildberries-ops/contracts";
 import { useRouter } from "next/navigation";
-import { startTransition, useActionState, useEffect, useId, useState } from "react";
+import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import {
   answerFeedbackAction,
   checkFeedbackAnswerAction,
@@ -11,6 +11,9 @@ import {
 } from "@/app/actions/feedbacks";
 import { Button } from "@/components/ui/button";
 import { useReplyNotification } from "@/components/feedbacks/reply-notifications";
+import ReplyDraft, {
+  type GenerateReplyDraftAction,
+} from "@/components/feedbacks/reply-draft";
 
 type ComposerState = (
   | AnswerFeedbackActionState
@@ -23,12 +26,19 @@ type ComposerState = (
 const initialState = { status: "idle", message: "" } satisfies ComposerState;
 const replyLengthMessage = "Enter a reply between 2 and 5,000 characters.";
 
-export default function ReplyComposer({
-  feedbackId,
-}: {
+type ReplyComposerProps = {
   feedbackId: string;
-}) {
+  /** Supply a Server Action to enable AI drafting. */
+  generateDraftAction?: GenerateReplyDraftAction;
+};
+
+export default function ReplyComposer(props: ReplyComposerProps) {
+  return <ReviewReplyComposer key={props.feedbackId} {...props} />;
+}
+
+function ReviewReplyComposer({ feedbackId, generateDraftAction }: ReplyComposerProps) {
   const inputId = useId();
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
   const notify = useReplyNotification();
   const [text, setText] = useState("");
@@ -132,6 +142,7 @@ export default function ReplyComposer({
 
       <textarea
         id={inputId}
+        ref={inputRef}
         name="text"
         value={text}
         onChange={(event) => setText(event.target.value)}
@@ -156,6 +167,19 @@ export default function ReplyComposer({
       >
         {textError}
       </p>
+
+      {!answered && (
+        <ReplyDraft
+          feedbackId={feedbackId}
+          generateDraftAction={generateDraftAction}
+          disabled={pending || coolingDown || needsStatusCheck}
+          hasReply={text.length > 0}
+          onUseDraft={(draft) => {
+            setText(draft);
+            inputRef.current?.focus();
+          }}
+        />
+      )}
 
       {state.status === "error" && (
         <p role="alert" className="text-sm text-destructive">

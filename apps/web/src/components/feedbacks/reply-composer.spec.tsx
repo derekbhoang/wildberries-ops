@@ -15,6 +15,7 @@ import type {
   AnswerFeedbackActionState,
 } from "@/app/actions/feedbacks";
 import ReplyComposer from "./reply-composer";
+import type { GenerateReplyDraftAction } from "./reply-draft";
 
 const { answerMock, checkMock, refreshMock, reviewResultsMock } = vi.hoisted(() => ({
   answerMock: vi.fn<typeof answerFeedbackAction>(),
@@ -306,5 +307,230 @@ describe("ReplyComposer", () => {
     expect(input.readOnly).toBe(true);
     expect(input.value).toBe(draft);
     expect(answerMock).toHaveBeenCalledTimes(1);
+  });
+
+  describe("AI drafts", () => {
+    const suggestion = "Thank you for sharing your experience with our product.";
+    let generateMock: ReturnType<typeof vi.fn<GenerateReplyDraftAction>>;
+
+    beforeEach(() => {
+      generateMock = vi.fn<GenerateReplyDraftAction>();
+      generateMock.mockResolvedValue({ text: suggestion });
+      reviewResultsMock.mockReturnValue(
+        <ReplyComposer feedbackId="review-1" generateDraftAction={generateMock} />,
+      );
+    });
+
+    it("disables generation until a generator is supplied", () => {
+      reviewResultsMock.mockReturnValue(<ReplyComposer feedbackId="review-1" />);
+      renderComposer();
+
+      expect(screen.getByRole<HTMLButtonElement>("button", {
+        name: "Generate draft",
+      }).disabled).toBe(true);
+      expect(screen.getByText("AI drafting is currently unavailable.")).toBeDefined();
+      expect(generateMock).not.toHaveBeenCalled();
+    });
+
+    it("previews and edits a draft, replacing reply text only when explicitly used", async () => {
+      renderComposer();
+      const input = enterDraft();
+      fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+
+      const preview = await screen.findByRole<HTMLTextAreaElement>("textbox", {
+        name: "Draft preview",
+      });
+      expect(generateMock).toHaveBeenCalledExactlyOnceWith("review-1");
+      expect(preview.value).toBe(suggestion);
+      expect(input.value).toBe(draft);
+      expect(screen.getByText(/Using this draft replaces your reply text/)).toBeDefined();
+      expect(answerMock).not.toHaveBeenCalled();
+
+      const editedSuggestion = "Thank you! We appreciate your detailed review.";
+      fireEvent.change(preview, { target: { value: editedSuggestion } });
+      expect(input.value).toBe(draft);
+      fireEvent.click(screen.getByRole("button", { name: "Use draft" }));
+
+      expect(input.value).toBe(editedSuggestion);
+      expect(document.activeElement).toBe(input);
+      expect(answerMock).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+
+      await waitFor(() => expect(answerMock).toHaveBeenCalledTimes(1));
+      const [, , formData] = answerMock.mock.calls[0]!;
+      expect(formData.get("text")).toBe(editedSuggestion);
+      expect(formData.has("suggestion")).toBe(false);
+    });
+
+    it("allows writing and sending a manual reply while generation is pending", async () => {
+      const generation = Promise.withResolvers<{ text: string }>();
+      const submission = Promise.withResolvers<AnswerFeedbackActionState>();
+      generateMock.mockReturnValueOnce(generation.promise);
+      answerMock.mockReturnValueOnce(submission.promise);
+      renderComposer();
+      const input = enterDraft();
+      const generate = screen.getByRole("button", { name: "Generate draft" });
+      fireEvent.click(generate);
+      fireEvent.click(generate);
+      expect(generateMock).toHaveBeenCalledTimes(1);
+      expect(input.readOnly).toBe(false);
+
+      const manualReply = "I wrote this reply while the draft was generating.";
+      fireEvent.change(input, { target: { value: manualReply } });
+      fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+      await waitFor(() => expect(answerMock).toHaveBeenCalledTimes(1));
+
+      await act(async () => generation.resolve({ text: suggestion }));
+      expect(input.value).toBe(manualReply);
+      expect(screen.getByRole<HTMLButtonElement>("button", {
+        name: "Use draft",
+      }).disabled).toBe(true);
+
+      await act(async () => submission.resolve({
+        status: "submitted",
+        message: "Reply submitted.",
+      }));
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(answerMock.mock.calls[0]![2].get("text")).toBe(manualReply);
+    });
+
+    it("preserves reply text and an edited preview when regeneration fails", async () => {
+      renderComposer();
+      const input = enterDraft();
+      fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+      const preview = await screen.findByRole<HTMLTextAreaElement>("textbox", {
+        name: "Draft preview",
+      });
+      const editedSuggestion = "My edits to the suggested reply.";
+      fireEvent.change(preview, { target: { value: editedSuggestion } });
+      generateMock.mockRejectedValueOnce(new Error("Provider unavailable"));
+      fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "We couldn't generate a draft. Try again or write your reply.",
+      );
+      expect(input.value).toBe(draft);
+      expect(preview.value).toBe(editedSuggestion);
+      expect(answerMock).not.toHaveBeenCalled();
+    });
+
+    it.each(["", " \n\t ", "a", "a".repeat(5001)])(
+      "rejects invalid generated text without changing the reply (%#)",
+      async (text) => {
+        generateMock.mockResolvedValueOnce({ text });
+        renderComposer();
+        const input = enterDraft();
+        fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+
+        expect((await screen.findByRole("alert")).textContent).toBe(
+          "We couldn't generate a valid draft. Try again or write your reply.",
+        );
+        expect(input.value).toBe(draft);
+        expect(screen.queryByRole("textbox", { name: "Draft preview" })).toBeNull();
+        expect(answerMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("prevents using an invalid edited preview while keeping manual sending available", async () => {
+      renderComposer();
+      const input = enterDraft();
+      fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+      const preview = await screen.findByRole("textbox", { name: "Draft preview" });
+      fireEvent.change(preview, { target: { value: " " } });
+
+      expect(preview.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByRole<HTMLButtonElement>("button", {
+        name: "Use draft",
+      }).disabled).toBe(true);
+      expect(screen.getByRole<HTMLButtonElement>("button", {
+        name: "Send reply",
+      }).disabled).toBe(false);
+      expect(input.value).toBe(draft);
+    });
+
+    it.each(["resolve", "reject"] as const)(
+      "ignores a cancelled request that later %ss after a newer draft arrives",
+      async (outcome) => {
+        const oldGeneration = Promise.withResolvers<{ text: string }>();
+        generateMock.mockReturnValueOnce(oldGeneration.promise);
+        renderComposer();
+        const input = enterDraft();
+        fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+        fireEvent.click(screen.getByRole("button", { name: "Cancel generation" }));
+        fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+
+        const preview = await screen.findByRole<HTMLTextAreaElement>("textbox", {
+          name: "Draft preview",
+        });
+        await act(async () => {
+          if (outcome === "resolve") {
+            oldGeneration.resolve({ text: "This is a stale draft." });
+          } else {
+            oldGeneration.reject(new Error("Stale error"));
+          }
+        });
+
+        expect(preview.value).toBe(suggestion);
+        expect(input.value).toBe(draft);
+        expect(screen.queryByRole("alert")).toBeNull();
+        expect(generateMock).toHaveBeenCalledTimes(2);
+        expect(answerMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("discards the old review's text and pending generation when the review changes", async () => {
+      const oldGeneration = Promise.withResolvers<{ text: string }>();
+      generateMock.mockReturnValueOnce(oldGeneration.promise);
+      const view = renderComposer();
+      enterDraft();
+      fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+      reviewResultsMock.mockReturnValue(
+        <ReplyComposer feedbackId="review-2" generateDraftAction={generateMock} />,
+      );
+      view.rerender(<Home {...pageProps} />);
+
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox", {
+        name: "Reply",
+      }).value).toBe("");
+      await act(async () => oldGeneration.resolve({ text: "Old review's draft." }));
+      expect(screen.queryByRole("textbox", { name: "Draft preview" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+      const preview = await screen.findByRole<HTMLTextAreaElement>("textbox", {
+        name: "Draft preview",
+      });
+      expect(preview.value).toBe(suggestion);
+      expect(generateMock).toHaveBeenLastCalledWith("review-2");
+    });
+
+    it("keeps draft controls from bypassing an uncertain submission status", async () => {
+      answerMock.mockResolvedValueOnce({
+        status: "error",
+        ok: false,
+        reason: "submission-unknown",
+        message: "Could not confirm submission.",
+      });
+      checkMock.mockResolvedValueOnce({
+        status: "answered",
+        message: "A reply already exists on Wildberries.",
+        answer: { text: draft, state: "reviewRequired" },
+      });
+      renderComposer();
+      enterDraft();
+      fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+      await screen.findByRole("textbox", { name: "Draft preview" });
+      fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+      const check = await screen.findByRole("button", { name: "Check reply status" });
+
+      expect(screen.getByRole<HTMLButtonElement>("button", {
+        name: "Use draft",
+      }).disabled).toBe(true);
+      expect(screen.getByRole<HTMLButtonElement>("button", {
+        name: "Regenerate",
+      }).disabled).toBe(true);
+      fireEvent.click(check);
+      await screen.findByText("A reply already exists on Wildberries.");
+      expect(screen.queryByRole("region", { name: "AI draft" })).toBeNull();
+      expect(answerMock).toHaveBeenCalledTimes(1);
+    });
   });
 });
