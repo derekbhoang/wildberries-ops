@@ -1,7 +1,8 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { AiModule } from '@nestjs/ai';
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../config/env.validation.js';
 import { WildberriesModule } from '../wildberries/wildberries.module.js';
 import { FeedbackDraftsController } from './feedback-drafts.controller.js';
 import { FeedbackDraftsService } from './feedback-drafts.service.js';
@@ -16,17 +17,16 @@ import { ThrottlerModule } from '@nestjs/throttler';
       getTracker: () => 'configured-seller',
     }),
     AiModule.forRootAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
+      useFactory: (config: ConfigService<Env, true>) => {
         const openai = createOpenAI({
-          apiKey: config.getOrThrow<string>('OPENAI_API_KEY'),
+          apiKey: config.get('OPENAI_API_KEY', { infer: true }),
         });
 
         return {
           models: {
             reviewReply: openai(
-              config.getOrThrow<string>('OPENAI_REPLY_MODEL'),
+              config.get('OPENAI_REPLY_MODEL', { infer: true }),
             ),
           },
           defaults: {

@@ -31,6 +31,12 @@
 $ pnpm install
 ```
 
+For local development, copy `.env.example` to `.env` in `apps/server`.
+Set `WB_API_KEY`, `OPENAI_API_KEY`, and `OPENAI_REPLY_MODEL` before
+starting the API. Variables set in the process environment take precedence
+over `.env`. `PORT` defaults to `3000` when omitted. The example sets it
+to `3001` to match the web app's example configuration.
+
 ## Compile and run the project
 
 ```bash

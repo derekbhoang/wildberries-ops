@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { ConfigModule } from '@nestjs/config';
-import { validateEnv } from './config/env.validation.js';
+import { envSchema } from './config/env.validation.js';
 import { WildberriesModule } from './wildberries/wildberries.module.js';
 import { FeedbackDraftsModule } from './feedback-drafts/feedback-drafts.module.js';
 
@@ -12,7 +12,7 @@ import { FeedbackDraftsModule } from './feedback-drafts/feedback-drafts.module.j
       isGlobal: true,
       envFilePath: '.env',
       skipProcessEnv: true,
-      validate: validateEnv,
+      validationSchema: envSchema,
     }),
     WildberriesModule,
     FeedbackDraftsModule,

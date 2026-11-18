@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { HttpClientModule } from '@nestjs/http-client';
+import type { Env } from '../config/env.validation.js';
 import { WildberriesService } from './wildberries.service.js';
 import { FeedbacksController } from './feedbacks.controller.js';
 
@@ -8,12 +9,11 @@ import { FeedbacksController } from './feedbacks.controller.js';
   imports: [
     HttpClientModule.registerAsync({
       name: 'wbFeedbacks',
-      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      useFactory: (config: ConfigService<Env, true>) => ({
         baseUrl: 'https://feedbacks-api.wildberries.ru',
         headers: {
-          Authorization: config.getOrThrow<string>('WB_API_KEY'),
+          Authorization: config.get('WB_API_KEY', { infer: true }),
         },
         timeout: 10_000,
         retry: false,
