@@ -4,10 +4,12 @@ import { unstable_rethrow } from "next/navigation";
 import {
   feedbackAnswerSchema,
   feedbackAnswerStatusSchema,
+  feedbackDraftSchema,
   feedbackIdSchema,
   feedbacksPageSchema,
   type FeedbackAnswerResult,
   type FeedbackAnswerStatus,
+  type FeedbackDraft,
   type FeedbacksPage,
 } from "@wildberries-ops/contracts";
 
@@ -297,4 +299,100 @@ export async function getFeedbackAnswer(
   return parsed.success && parsed.data.id === parsedId.data
     ? { ok: true, data: parsed.data }
     : { ok: false, reason: "unavailable" };
+}
+
+export type GenerateFeedbackDraftResult =
+  | { ok: true; data: FeedbackDraft }
+  | { ok: false; reason: "rate-limited"; retryAfterSeconds?: number }
+  | {
+      ok: false;
+      reason:
+        | "invalid-input"
+        | "already-answered"
+        | "access-denied"
+        | "timeout"
+        | "unavailable"
+        | "invalid-response";
+    };
+
+export async function generateFeedbackDraft(
+  id: unknown,
+): Promise<GenerateFeedbackDraftResult> {
+  const parsedId = feedbackIdSchema.safeParse(id);
+  if (!parsedId.success) return { ok: false, reason: "invalid-input" };
+
+  const feedbackId = parsedId.data;
+  // Reject IDs that URL construction would normalize or fail to encode.
+  if (feedbackId === "." || feedbackId === ".." || !feedbackId.isWellFormed()) {
+    return { ok: false, reason: "invalid-input" };
+  }
+
+  const apiUrl = process.env.API_URL?.trim();
+  if (!apiUrl) throw new Error("API_URL is required");
+
+  const url = new URL(`/feedbacks/${encodeURIComponent(feedbackId)}/draft`, apiUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("API_URL must use HTTP or HTTPS");
+  }
+
+  // Allow the API's 25-second draft deadline to expire first.
+  const signal = AbortSignal.timeout(30_000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      redirect: "error",
+      signal,
+    });
+  } catch (error) {
+    unstable_rethrow(error);
+    return { ok: false, reason: signal.aborted ? "timeout" : "unavailable" };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    unstable_rethrow(error);
+  }
+
+  if (response.status === 429) {
+    const retryAfter = response.headers.get("Retry-After")?.trim();
+    const seconds = /^\d+$/.test(retryAfter ?? "") ? Number(retryAfter) : NaN;
+    return {
+      ok: false,
+      reason: "rate-limited",
+      retryAfterSeconds: Number.isSafeInteger(seconds) ? seconds : undefined,
+    };
+  }
+  if (signal.aborted || response.status === 504) {
+    return { ok: false, reason: "timeout" };
+  }
+  if (response.status === 409 && hasCode(body, "FEEDBACK_ALREADY_ANSWERED")) {
+    return { ok: false, reason: "already-answered" };
+  }
+  if (response.status === 502 && hasCode(body, "WB_ACCESS_DENIED")) {
+    return { ok: false, reason: "access-denied" };
+  }
+  if (response.status === 503 && hasCode(body, "WB_RATE_LIMITED")) {
+    return {
+      ok: false,
+      reason: "rate-limited",
+      retryAfterSeconds: readRetryAfterSeconds(body),
+    };
+  }
+  if (
+    response.status === 502 &&
+    (hasCode(body, "WB_INVALID_RESPONSE") || hasCode(body, "AI_INVALID_RESPONSE"))
+  ) {
+    return { ok: false, reason: "invalid-response" };
+  }
+  if (!response.ok) return { ok: false, reason: "unavailable" };
+
+  const parsed = feedbackDraftSchema.safeParse(body);
+  return parsed.success && parsed.data.feedbackId === feedbackId
+    ? { ok: true, data: parsed.data }
+    : { ok: false, reason: "invalid-response" };
 }

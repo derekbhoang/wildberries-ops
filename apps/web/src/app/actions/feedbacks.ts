@@ -3,8 +3,10 @@
 import type { FeedbackAnswerStatus } from "@wildberries-ops/contracts";
 import {
   answerFeedback,
+  generateFeedbackDraft,
   getFeedbackAnswer,
   type AnswerFeedbackResult,
+  type GenerateFeedbackDraftResult,
   type GetFeedbackAnswerResult,
 } from "@/lib/feedbacks";
 
@@ -85,4 +87,39 @@ export async function checkFeedbackAnswerAction(
     status: "unanswered",
     message: "Wildberries currently shows no reply. Review your draft before sending again.",
   };
+}
+
+type GenerateFeedbackDraftFailure = Extract<
+  GenerateFeedbackDraftResult,
+  { ok: false }
+>;
+
+export type GenerateFeedbackDraftActionResult =
+  | { status: "generated"; text: string }
+  | (GenerateFeedbackDraftFailure & { status: "error"; message: string });
+
+const draftFailureMessages: Record<GenerateFeedbackDraftFailure["reason"], string> = {
+  "invalid-input": "This review is invalid. Refresh the inbox and try again.",
+  "already-answered": "A reply already exists on Wildberries. Refresh the inbox to see the latest reviews.",
+  "access-denied": "Check your seller connection and API key permissions.",
+  "rate-limited": "Draft generation is temporarily rate limited. Try again shortly or write your reply.",
+  timeout: "Generating a draft took too long. Try again or write your reply.",
+  unavailable: "We couldn't generate a draft. Try again or write your reply.",
+  "invalid-response": "We couldn't generate a valid draft. Try again or write your reply.",
+};
+
+export async function generateFeedbackDraftAction(
+  feedbackId: string,
+): Promise<GenerateFeedbackDraftActionResult> {
+  const result = await generateFeedbackDraft(feedbackId);
+  if (result.ok) return { status: "generated", text: result.data.text };
+
+  let message = draftFailureMessages[result.reason];
+  if (result.reason === "rate-limited" && result.retryAfterSeconds) {
+    const seconds = result.retryAfterSeconds;
+    const duration = `${seconds.toLocaleString("en-AU")} ${seconds === 1 ? "second" : "seconds"}`;
+    message = `Draft generation is temporarily rate limited. Wait ${duration} before trying again, or write your reply.`;
+  }
+
+  return { ...result, status: "error", message };
 }

@@ -3,6 +3,7 @@ import "server-only";
 import type { Feedback } from "@wildberries-ops/contracts";
 import Link from "next/link";
 import { Suspense } from "react";
+import { generateFeedbackDraftAction } from "@/app/actions/feedbacks";
 import { getFeedbacks, type FeedbacksResult } from "@/lib/feedbacks";
 import ReplyComposer from "@/components/feedbacks/reply-composer";
 
@@ -95,7 +96,10 @@ function ReviewCard({ review }: { review: Feedback }) {
         )}
       </footer>
 
-      <ReplyComposer feedbackId={review.id} />
+      <ReplyComposer
+        feedbackId={review.id}
+        generateDraftAction={generateFeedbackDraftAction}
+      />
     </article>
   );
 }
@@ -142,7 +146,7 @@ function ReviewsFailure({
   );
 }
 
-async function ReviewResults({ page }: { page: number }) {
+export async function ReviewResults({ page }: { page: number }) {
   const result = await getFeedbacks({
     take: PAGE_SIZE + 1,
     skip: (page - 1) * PAGE_SIZE,

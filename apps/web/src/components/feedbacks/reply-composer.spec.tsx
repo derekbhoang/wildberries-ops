@@ -13,6 +13,7 @@ import type {
   answerFeedbackAction,
   checkFeedbackAnswerAction,
   AnswerFeedbackActionState,
+  GenerateFeedbackDraftActionResult,
 } from "@/app/actions/feedbacks";
 import ReplyComposer from "./reply-composer";
 import type { GenerateReplyDraftAction } from "./reply-draft";
@@ -315,7 +316,7 @@ describe("ReplyComposer", () => {
 
     beforeEach(() => {
       generateMock = vi.fn<GenerateReplyDraftAction>();
-      generateMock.mockResolvedValue({ text: suggestion });
+      generateMock.mockResolvedValue({ status: "generated", text: suggestion });
       reviewResultsMock.mockReturnValue(
         <ReplyComposer feedbackId="review-1" generateDraftAction={generateMock} />,
       );
@@ -363,7 +364,7 @@ describe("ReplyComposer", () => {
     });
 
     it("allows writing and sending a manual reply while generation is pending", async () => {
-      const generation = Promise.withResolvers<{ text: string }>();
+      const generation = Promise.withResolvers<GenerateFeedbackDraftActionResult>();
       const submission = Promise.withResolvers<AnswerFeedbackActionState>();
       generateMock.mockReturnValueOnce(generation.promise);
       answerMock.mockReturnValueOnce(submission.promise);
@@ -380,7 +381,7 @@ describe("ReplyComposer", () => {
       fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
       await waitFor(() => expect(answerMock).toHaveBeenCalledTimes(1));
 
-      await act(async () => generation.resolve({ text: suggestion }));
+      await act(async () => generation.resolve({ status: "generated", text: suggestion }));
       expect(input.value).toBe(manualReply);
       expect(screen.getByRole<HTMLButtonElement>("button", {
         name: "Use draft",
@@ -417,7 +418,7 @@ describe("ReplyComposer", () => {
     it.each(["", " \n\t ", "a", "a".repeat(5001)])(
       "rejects invalid generated text without changing the reply (%#)",
       async (text) => {
-        generateMock.mockResolvedValueOnce({ text });
+        generateMock.mockResolvedValueOnce({ status: "generated", text });
         renderComposer();
         const input = enterDraft();
         fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
@@ -451,7 +452,7 @@ describe("ReplyComposer", () => {
     it.each(["resolve", "reject"] as const)(
       "ignores a cancelled request that later %ss after a newer draft arrives",
       async (outcome) => {
-        const oldGeneration = Promise.withResolvers<{ text: string }>();
+        const oldGeneration = Promise.withResolvers<GenerateFeedbackDraftActionResult>();
         generateMock.mockReturnValueOnce(oldGeneration.promise);
         renderComposer();
         const input = enterDraft();
@@ -464,7 +465,7 @@ describe("ReplyComposer", () => {
         });
         await act(async () => {
           if (outcome === "resolve") {
-            oldGeneration.resolve({ text: "This is a stale draft." });
+            oldGeneration.resolve({ status: "generated", text: "This is a stale draft." });
           } else {
             oldGeneration.reject(new Error("Stale error"));
           }
@@ -479,7 +480,7 @@ describe("ReplyComposer", () => {
     );
 
     it("discards the old review's text and pending generation when the review changes", async () => {
-      const oldGeneration = Promise.withResolvers<{ text: string }>();
+      const oldGeneration = Promise.withResolvers<GenerateFeedbackDraftActionResult>();
       generateMock.mockReturnValueOnce(oldGeneration.promise);
       const view = renderComposer();
       enterDraft();
@@ -492,7 +493,7 @@ describe("ReplyComposer", () => {
       expect(screen.getByRole<HTMLTextAreaElement>("textbox", {
         name: "Reply",
       }).value).toBe("");
-      await act(async () => oldGeneration.resolve({ text: "Old review's draft." }));
+      await act(async () => oldGeneration.resolve({ status: "generated", text: "Old review's draft." }));
       expect(screen.queryByRole("textbox", { name: "Draft preview" })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
       const preview = await screen.findByRole<HTMLTextAreaElement>("textbox", {

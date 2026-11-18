@@ -1,10 +1,9 @@
 import { feedbackAnswerSchema } from "@wildberries-ops/contracts";
 import { useEffect, useId, useRef, useState } from "react";
+import type { generateFeedbackDraftAction } from "@/app/actions/feedbacks";
 import { Button } from "@/components/ui/button";
 
-export type GenerateReplyDraftAction = (
-  feedbackId: string,
-) => Promise<{ text: string }>;
+export type GenerateReplyDraftAction = typeof generateFeedbackDraftAction;
 
 export default function ReplyDraft({
   feedbackId,
@@ -12,12 +11,14 @@ export default function ReplyDraft({
   disabled,
   hasReply,
   onUseDraft,
+  onAlreadyAnswered,
 }: {
   feedbackId: string;
   generateDraftAction?: GenerateReplyDraftAction;
   disabled: boolean;
   hasReply: boolean;
   onUseDraft: (text: string) => void;
+  onAlreadyAnswered: () => void;
 }) {
   const inputId = useId();
   const requestId = useRef(0);
@@ -45,7 +46,13 @@ export default function ReplyDraft({
       const result = await generateDraftAction(feedbackId);
       if (currentRequest !== requestId.current) return;
 
-      const parsed = feedbackAnswerSchema.safeParse(result);
+      if (result.status === "error") {
+        setError(result.message);
+        if (result.reason === "already-answered") onAlreadyAnswered();
+        return;
+      }
+
+      const parsed = feedbackAnswerSchema.safeParse({ text: result.text });
       if (!parsed.success) {
         setError("We couldn't generate a valid draft. Try again or write your reply.");
         return;

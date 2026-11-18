@@ -43,10 +43,12 @@ function ReviewReplyComposer({ feedbackId, generateDraftAction }: ReplyComposerP
   const notify = useReplyNotification();
   const [text, setText] = useState("");
   const [now, setNow] = useState(0);
+  const [alreadyAnswered, setAlreadyAnswered] = useState(false);
 
   const [state, formAction, pending] = useActionState<ComposerState, FormData>(
     async (previousState, formData) => {
       if (
+        alreadyAnswered ||
         previousState.status === "submitted" ||
         previousState.status === "answered" ||
         (previousState.retryAt !== undefined &&
@@ -130,7 +132,7 @@ function ReviewReplyComposer({ feedbackId, generateDraftAction }: ReplyComposerP
     text.length > 0 && !valid ? replyLengthMessage : serverTextError;
 
   const needsStatusCheck = state.needsStatusCheck === true;
-  const answered = state.status === "answered";
+  const answered = alreadyAnswered || state.status === "answered";
 
   if (state.status === "submitted") return null;
 
@@ -168,12 +170,13 @@ function ReviewReplyComposer({ feedbackId, generateDraftAction }: ReplyComposerP
         {textError}
       </p>
 
-      {!answered && (
+      {state.status !== "answered" && (
         <ReplyDraft
           feedbackId={feedbackId}
           generateDraftAction={generateDraftAction}
-          disabled={pending || coolingDown || needsStatusCheck}
+          disabled={pending || coolingDown || needsStatusCheck || answered}
           hasReply={text.length > 0}
+          onAlreadyAnswered={() => setAlreadyAnswered(true)}
           onUseDraft={(draft) => {
             setText(draft);
             inputRef.current?.focus();
@@ -212,7 +215,7 @@ function ReviewReplyComposer({ feedbackId, generateDraftAction }: ReplyComposerP
         >
           {pending && !needsStatusCheck ? "Sending…" : "Send reply"}
         </Button>
-        {needsStatusCheck && (
+        {needsStatusCheck && !answered && (
           <Button
             type="submit"
             name="intent"
