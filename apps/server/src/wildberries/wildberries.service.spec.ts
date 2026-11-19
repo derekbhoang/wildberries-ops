@@ -13,6 +13,7 @@ import { WildberriesService } from './wildberries.service.js';
 
 describe('WildberriesService', () => {
   const secret = 'test-secret-do-not-log';
+  const feedbackListTime = Date.parse('2026-11-20T00:00:00.999Z');
   const fetchMock = vi.fn<typeof globalThis.fetch>();
   const feedback = {
     id: 'review-1',
@@ -20,7 +21,7 @@ describe('WildberriesService', () => {
     pros: null,
     cons: '',
     productValuation: 5,
-    createdDate: '2026-11-12T00:00:00Z',
+    createdDate: '2026-11-18T00:00:00Z',
     productDetails: { nmId: 123, productName: 'Test product' },
   };
   const page = {
@@ -82,7 +83,8 @@ describe('WildberriesService', () => {
     return caught.getResponse();
   }
 
-  it('returns validated reviews and requests the default unanswered page', async () => {
+  it('requests the default unanswered page within the last three days', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(feedbackListTime);
     fetchMock.mockResolvedValueOnce(
       Response.json({ error: false, data: page, errorText: secret }),
     );
@@ -99,13 +101,16 @@ describe('WildberriesService', () => {
       take: '50',
       skip: '0',
       order: 'dateDesc',
+      dateFrom: '1794873600',
+      dateTo: '1795132800',
     });
     expect(new Headers(options?.headers).get('Authorization')).toBe(secret);
     expect(warnMock).not.toHaveBeenCalled();
     expect(errorMock).not.toHaveBeenCalled();
   });
 
-  it('accepts an empty page and forwards explicit pagination', async () => {
+  it('accepts an empty page and forwards pagination with the date bounds', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(feedbackListTime);
     const emptyPage = { ...page, feedbacks: [] };
     fetchMock.mockResolvedValueOnce(
       Response.json({ error: false, data: emptyPage }),
@@ -118,6 +123,8 @@ describe('WildberriesService', () => {
     const url = new URL(input instanceof Request ? input.url : input);
     expect(url.searchParams.get('take')).toBe('25');
     expect(url.searchParams.get('skip')).toBe('50');
+    expect(url.searchParams.get('dateFrom')).toBe('1794873600');
+    expect(url.searchParams.get('dateTo')).toBe('1795132800');
   });
 
   it.each([

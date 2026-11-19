@@ -84,6 +84,9 @@ describe("Review inbox", () => {
     );
     await renderInbox();
 
+    const count = screen.getByText("unanswered reviews in the last 3 days");
+    expect(count.textContent).toBe("3 unanswered reviews in the last 3 days");
+
     const cards = screen.getAllByRole("article");
     expect(cards).toHaveLength(3);
     const complete = cards[0]!;

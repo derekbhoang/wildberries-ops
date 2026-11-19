@@ -26,6 +26,8 @@ import {
   type FeedbackAnswerStatus,
 } from '@wildberries-ops/contracts';
 
+const FEEDBACK_LOOKBACK_SECONDS = 3 * 24 * 60 * 60;
+
 @Injectable()
 export class WildberriesService {
   private readonly logger = new Logger(WildberriesService.name);
@@ -50,6 +52,9 @@ export class WildberriesService {
       throw new BadRequestException('Invalid review pagination');
     }
 
+    const dateTo = Math.floor(Date.now() / 1_000);
+    const dateFrom = dateTo - FEEDBACK_LOOKBACK_SECONDS;
+
     try {
       const { data: body } = await this.http.get<unknown>('/api/v1/feedbacks', {
         responseType: 'json',
@@ -58,6 +63,8 @@ export class WildberriesService {
           take,
           skip,
           order: 'dateDesc',
+          dateFrom,
+          dateTo,
         },
       });
 

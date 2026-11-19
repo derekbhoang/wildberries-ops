@@ -186,7 +186,7 @@ export async function ReviewResults({ page }: { page: number }) {
           <span className="font-medium text-foreground">
             {result.data.countUnanswered.toLocaleString("en-AU")}
           </span>{" "}
-          unanswered reviews
+          unanswered reviews in the last 3 days
         </p>
         <p>Dates shown in Sydney time</p>
       </div>
@@ -205,7 +205,9 @@ export async function ReviewResults({ page }: { page: number }) {
           className="space-y-2 rounded-xl border border-dashed p-8 text-center"
         >
           <h2 className="font-semibold">
-            {page === 1 ? "No unanswered reviews" : "No reviews on this page"}
+            {page === 1
+              ? "No unanswered reviews in the last 3 days"
+              : "No reviews on this page"}
           </h2>
           <p className="text-sm text-muted-foreground">
             {page === 1
