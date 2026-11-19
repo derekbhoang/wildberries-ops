@@ -85,6 +85,12 @@ export class FeedbackDraftsService {
       });
     }
 
+    const status = feedback.orderStatus?.trim();
+    const orderStatus =
+      status === 'buyout' || status === 'rejected' || status === 'returned'
+        ? status
+        : null;
+
     const generated = await this.generator.generate(
       {
         review: {
@@ -92,13 +98,16 @@ export class FeedbackDraftsService {
           pros: feedback.pros?.trim() || null,
           cons: feedback.cons?.trim() || null,
           rating: feedback.productValuation,
+          userName: feedback.userName?.trim() || null,
         },
         product: feedback.productDetails
           ? {
               nmId: feedback.productDetails.nmId,
               name: feedback.productDetails.productName?.trim() || null,
+              size: feedback.productDetails.size?.trim() || null,
             }
           : null,
+        orderStatus,
       },
       signal,
     );

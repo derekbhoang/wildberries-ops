@@ -460,19 +460,25 @@ describe('WildberriesService', () => {
       { text: 'Thank you!', state: 'reviewRequired' },
       { text: 'Thank you!', state: 'rejected' },
     ])('returns validated review context and answer %j using one GET', async (answer) => {
+      const review = {
+        ...feedback,
+        userName: 'Anna',
+        orderStatus: 'buyout',
+        productDetails: { ...feedback.productDetails, size: 'M' },
+      };
       fetchMock.mockResolvedValueOnce(Response.json({
         error: false,
         data: {
-          ...feedback,
+          ...review,
           answer: answer && { ...answer, privateField: secret },
-          productDetails: { ...feedback.productDetails, privateField: secret },
+          productDetails: { ...review.productDetails, privateField: secret },
           privateField: secret,
         },
         errorText: secret,
       }));
 
       await expect(service.getFeedbackForDraft(` ${feedback.id} `))
-        .resolves.toEqual({ ...feedback, answer });
+        .resolves.toEqual({ ...review, answer });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [input, options] = fetchMock.mock.calls[0]!;

@@ -23,7 +23,9 @@ describe('FeedbackDraftsService', () => {
     cons: ' \n\t ',
     productValuation: 4,
     createdDate: '2026-11-18T00:00:00Z',
-    productDetails: { nmId: 123, productName: '  Coffee  ' },
+    productDetails: { nmId: 123, productName: '  Coffee  ', size: '  250 g  ' },
+    userName: '  Anna  ',
+    orderStatus: '  buyout  ',
     answer: null,
   };
   let service: FeedbackDraftsService;
@@ -70,8 +72,15 @@ describe('FeedbackDraftsService', () => {
     );
     expect(generateReply).toHaveBeenCalledExactlyOnceWith(
       {
-        review: { text: 'Good coffee', pros: 'Fresh', cons: null, rating: 4 },
-        product: { nmId: 123, name: 'Coffee' },
+        review: {
+          text: 'Good coffee',
+          pros: 'Fresh',
+          cons: null,
+          rating: 4,
+          userName: 'Anna',
+        },
+        product: { nmId: 123, name: 'Coffee', size: '250 g' },
+        orderStatus: 'buyout',
       },
       getFeedback.mock.calls[0]![1],
     );
@@ -91,8 +100,15 @@ describe('FeedbackDraftsService', () => {
     await service.generate(feedback.id);
 
     expect(generateReply.mock.calls[0]![0]).toEqual({
-      review: { text: 'Good coffee', pros: 'Fresh', cons: null, rating: 4 },
-      product: { nmId: 123, name: 'Coffee' },
+      review: {
+        text: 'Good coffee',
+        pros: 'Fresh',
+        cons: null,
+        rating: 4,
+        userName: 'Anna',
+      },
+      product: { nmId: 123, name: 'Coffee', size: '250 g' },
+      orderStatus: 'buyout',
     });
   });
 
@@ -100,11 +116,25 @@ describe('FeedbackDraftsService', () => {
     { name: 'absent fields', optional: {} },
     {
       name: 'null fields',
-      optional: { text: null, pros: null, cons: null, productDetails: null },
+      optional: {
+        text: null,
+        pros: null,
+        cons: null,
+        productDetails: null,
+        userName: null,
+        orderStatus: null,
+      },
     },
     {
       name: 'blank fields',
-      optional: { text: '  ', pros: '\n', cons: '\t', productDetails: null },
+      optional: {
+        text: '  ',
+        pros: '\n',
+        cons: '\t',
+        productDetails: null,
+        userName: '  ',
+        orderStatus: '  ',
+      },
     },
   ])('supports rating-only reviews with $name', async ({ optional }) => {
     getFeedback.mockResolvedValueOnce({
@@ -119,19 +149,26 @@ describe('FeedbackDraftsService', () => {
 
     expect(generateReply).toHaveBeenCalledWith(
       {
-        review: { text: null, pros: null, cons: null, rating: 2 },
+        review: {
+          text: null,
+          pros: null,
+          cons: null,
+          rating: 2,
+          userName: null,
+        },
         product: null,
+        orderStatus: null,
       },
       expect.any(AbortSignal),
     );
   });
 
   it.each([undefined, null, '  '])(
-    'supports an unavailable product name: %j',
-    async (productName) => {
+    'supports unavailable product name and size: %j',
+    async (value) => {
       getFeedback.mockResolvedValueOnce({
         ...feedback,
-        productDetails: { nmId: 123, productName },
+        productDetails: { nmId: 123, productName: value, size: value },
       });
 
       await service.generate(feedback.id);
@@ -139,9 +176,23 @@ describe('FeedbackDraftsService', () => {
       expect(generateReply.mock.calls[0]![0].product).toEqual({
         nmId: 123,
         name: null,
+        size: null,
       });
     },
   );
+
+  it.each([
+    ['rejected', 'rejected'],
+    ['returned', 'returned'],
+    ['notSpecified', null],
+    ['unknown-status', null],
+  ])('maps order status %s to %j', async (orderStatus, expected) => {
+    getFeedback.mockResolvedValueOnce({ ...feedback, orderStatus });
+
+    await service.generate(feedback.id);
+
+    expect(generateReply.mock.calls[0]![0].orderStatus).toBe(expected);
+  });
 
   it.each(['', ' \n\t '])(
     'rejects invalid ID %j before fetching or generating',

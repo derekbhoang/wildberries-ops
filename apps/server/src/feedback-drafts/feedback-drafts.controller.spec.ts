@@ -27,7 +27,9 @@ describe('POST /feedbacks/:id/draft', () => {
     text: 'Good coffee',
     productValuation: 5,
     createdDate: '2026-11-18T00:00:00Z',
-    productDetails: { nmId: 123, productName: 'Coffee' },
+    productDetails: { nmId: 123, productName: 'Coffee', size: '250 g' },
+    userName: 'Anna',
+    orderStatus: 'returned',
     answer: null,
   };
   const draft = { feedbackId: feedback.id, text: 'Спасибо за отзыв!' };
@@ -104,7 +106,9 @@ describe('POST /feedbacks/:id/draft', () => {
       .post('/feedbacks/review-1/draft')
       .send({
         feedbackId: 'another-review',
-        review: { text: secret },
+        review: { text: secret, userName: secret },
+        product: { size: secret },
+        orderStatus: 'buyout',
         text: secret,
       })
       .expect(200)
@@ -115,8 +119,15 @@ describe('POST /feedbacks/:id/draft', () => {
       expect.any(AbortSignal),
     );
     expect(JSON.parse(model.lastCall!.lastUserMessage!)).toEqual({
-      review: { text: feedback.text, pros: null, cons: null, rating: 5 },
-      product: { name: 'Coffee' },
+      review: {
+        text: feedback.text,
+        pros: null,
+        cons: null,
+        rating: 5,
+        userName: 'Anna',
+      },
+      product: { name: 'Coffee', size: '250 g' },
+      orderStatus: 'returned',
     });
     expect(model.lastCall!.lastUserMessage).not.toContain(secret);
   });

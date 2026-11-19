@@ -20,8 +20,15 @@ import {
 describe('ReviewReplyGeneratorService', () => {
   const secret = 'private-provider-value-do-not-expose';
   const context: ReviewReplyContext = {
-    review: { text: 'Good coffee', pros: 'Fresh', cons: null, rating: 5 },
-    product: { nmId: 123, name: 'Coffee' },
+    review: {
+      text: 'Good coffee',
+      pros: 'Fresh',
+      cons: null,
+      rating: 5,
+      userName: 'Anna',
+    },
+    product: { nmId: 123, name: 'Coffee', size: '250 g' },
+    orderStatus: 'buyout',
   };
   let moduleRef: TestingModule;
   let service: ReviewReplyGeneratorService;
@@ -108,7 +115,8 @@ describe('ReviewReplyGeneratorService', () => {
     const call = model.lastCall!;
     expect(JSON.parse(call.lastUserMessage!)).toEqual({
       review: { ...context.review, text: injection },
-      product: { name: 'Coffee' },
+      product: { name: 'Coffee', size: '250 g' },
+      orderStatus: 'buyout',
     });
     expect(call.instructions).not.toContain(injection);
     expect(JSON.stringify(call.options.prompt)).not.toContain(secret);
@@ -121,13 +129,21 @@ describe('ReviewReplyGeneratorService', () => {
 
     await expect(
       service.generate({
-        review: { text: null, pros: null, cons: null, rating: 3 },
+        review: {
+          text: null,
+          pros: null,
+          cons: null,
+          rating: 3,
+          userName: null,
+        },
         product: null,
+        orderStatus: null,
       }),
     ).resolves.toEqual({ text: 'Спасибо за оценку!' });
     expect(JSON.parse(model.lastCall!.lastUserMessage!)).toEqual({
-      review: { text: null, pros: null, cons: null, rating: 3 },
+      review: { text: null, pros: null, cons: null, rating: 3, userName: null },
       product: null,
+      orderStatus: null,
     });
   });
 
