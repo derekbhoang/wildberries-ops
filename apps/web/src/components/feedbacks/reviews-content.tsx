@@ -15,6 +15,12 @@ const dateFormatter = new Intl.DateTimeFormat("en-AU", {
   dateStyle: "medium",
   timeZone: "Australia/Sydney",
 });
+const orderStatusLabels = new Map([
+  ["buyout", "Purchased"],
+  ["rejected", "Rejected"],
+  ["returned", "Returned"],
+  ["notSpecified", "Status unspecified"],
+]);
 
 type SearchParams = Record<string, string | string[] | undefined>;
 type FeedbacksFailure = Extract<FeedbacksResult, { ok: false }>;
@@ -34,6 +40,12 @@ function parsePage(value: SearchParams[string]): number | null {
 
 function ReviewCard({ review }: { review: Feedback }) {
   const product = review.productDetails;
+  const size = product?.size?.trim();
+  const userName = review.userName?.trim();
+  const orderStatus = review.orderStatus?.trim();
+  const orderStatusLabel = orderStatus
+    ? (orderStatusLabels.get(orderStatus) ?? "Unknown order status")
+    : undefined;
   const name =
     product?.productName?.trim() ||
     (product ? `Product ${product.nmId}` : "Unknown product");
@@ -48,15 +60,25 @@ function ReviewCard({ review }: { review: Feedback }) {
   return (
     <article className="space-y-4 rounded-xl border border-border bg-card p-5 text-card-foreground sm:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 space-y-1">
+        <div className="min-w-0 grow basis-36 space-y-1">
           <h2 className="break-words font-semibold">{name}</h2>
           {product && (
-            <p className="text-xs text-muted-foreground">WB {product.nmId}</p>
+            <p className="break-words text-xs text-muted-foreground">
+              WB {product.nmId}
+              {size && ` · Size ${size}`}
+            </p>
           )}
         </div>
-        <span className="rounded-md bg-muted px-2.5 py-1 text-sm font-medium">
-          {hasRating ? `${rating} / 5` : "Rating unavailable"}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-md bg-muted px-2.5 py-1 text-sm font-medium">
+            {hasRating ? `${rating} / 5` : "Rating unavailable"}
+          </span>
+          {orderStatusLabel && (
+            <span className="rounded-md border border-border px-2.5 py-1 text-xs font-medium">
+              {orderStatusLabel}
+            </span>
+          )}
+        </div>
       </header>
 
       {text && (
@@ -86,7 +108,8 @@ function ReviewCard({ review }: { review: Feedback }) {
         <p className="text-sm text-muted-foreground">No written review.</p>
       )}
 
-      <footer className="text-xs text-muted-foreground">
+      <footer className="break-words text-xs text-muted-foreground">
+        {userName && `${userName} · `}
         {hasDate ? (
           <time dateTime={createdDate.toISOString()}>
             {dateFormatter.format(createdDate)}

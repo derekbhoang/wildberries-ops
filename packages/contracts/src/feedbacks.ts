@@ -3,6 +3,7 @@ import { z } from "zod";
 export const feedbackProductDetailsSchema = z.object({
   nmId: z.number(),
   productName: z.string().nullish(),
+  size: z.string().nullish(),
 });
 
 export const feedbackSchema = z.object({
@@ -13,6 +14,8 @@ export const feedbackSchema = z.object({
   productValuation: z.number(),
   createdDate: z.string(),
   productDetails: feedbackProductDetailsSchema.nullish(),
+  userName: z.string().nullish(),
+  orderStatus: z.string().nullish(),
 });
 
 // Public response returned by GET /feedbacks.

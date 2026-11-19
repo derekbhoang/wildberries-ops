@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ReplyNotifications from "./reply-notifications";
 import { ReviewResults } from "./reviews-content";
@@ -15,6 +21,13 @@ const draftText = "Thank you for your feedback.";
 const editedText = "Thank you for sharing your feedback about the coffee.";
 const manualText = "Thank you for leaving us a review.";
 const fetchMock = vi.fn<typeof fetch>();
+const feedback = {
+  id: feedbackId,
+  text: "Great coffee.",
+  productValuation: 5,
+  createdDate: "2026-11-18T00:00:00Z",
+  productDetails: { nmId: 123456, productName: "Coffee" },
+};
 
 async function renderInbox() {
   // Resolve the async Server Component before rendering its interactive children.
@@ -30,7 +43,7 @@ function enterManualReply() {
   return reply;
 }
 
-describe("Review inbox draft generation", () => {
+describe("Review inbox", () => {
   beforeEach(() => {
     refresh.mockReset();
     fetchMock.mockReset();
@@ -40,15 +53,7 @@ describe("Review inbox draft generation", () => {
       Response.json({
         countUnanswered: 1,
         countArchive: 0,
-        feedbacks: [
-          {
-            id: feedbackId,
-            text: "Great coffee.",
-            productValuation: 5,
-            createdDate: "2026-11-18T00:00:00Z",
-            productDetails: { nmId: 123456, productName: "Coffee" },
-          },
-        ],
+        feedbacks: [feedback],
       }),
     );
   });
@@ -57,6 +62,42 @@ describe("Review inbox draft generation", () => {
     cleanup();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it("displays review metadata when present and handles unfamiliar statuses", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        countUnanswered: 3,
+        countArchive: 0,
+        feedbacks: [
+          {
+            ...feedback,
+            productDetails: { ...feedback.productDetails, size: " M " },
+            userName: " Anna ",
+            orderStatus: "returned",
+          },
+          { ...feedback, id: "review-2", orderStatus: "futureStatus" },
+          { ...feedback, id: "review-3" },
+        ],
+      }),
+    );
+    await renderInbox();
+
+    const cards = screen.getAllByRole("article");
+    expect(cards).toHaveLength(3);
+    const complete = cards[0]!;
+    const unfamiliar = cards[1]!;
+    const missing = cards[2]!;
+    expect(within(complete).getByText("WB 123456 · Size M")).toBeTruthy();
+    expect(within(complete).getByText("Returned")).toBeTruthy();
+    expect(complete.querySelector("footer")?.textContent).toBe(
+      "Anna · 18 Nov 2026",
+    );
+    expect(within(unfamiliar).getByText("Unknown order status")).toBeTruthy();
+    expect(within(missing).getByText("WB 123456")).toBeTruthy();
+    expect(within(missing).queryByText(/order status/i)).toBeNull();
+    expect(missing.querySelector("footer")?.textContent).toBe("18 Nov 2026");
   });
 
   it("generates and uses an edited draft before explicitly sending it", async () => {
